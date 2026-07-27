@@ -1,6 +1,6 @@
 ---
 objective: "Two users can send and receive E2E encrypted files (images, documents) through the existing message pipe, with visible send/receive progress and a client-side size limit."
-status: in-progress
+status: implemented
 ---
 
 # Plan: Send/receive E2E encrypted files

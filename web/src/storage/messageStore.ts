@@ -1,12 +1,20 @@
 const DB_NAME = "umbrachat-messages";
 const STORE_NAME = "messages";
 
+export interface ChatFile {
+  filename: string;
+  mimeType: string;
+  size: number;
+  bytes: Uint8Array;
+}
+
 export interface ChatMessage {
   id: string;
   direction: "sent" | "received";
   text: string;
   status: "sent" | "delivered" | "read";
   createdAt: string;
+  file?: ChatFile;
 }
 
 function openDb(): Promise<IDBDatabase> {

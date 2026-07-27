@@ -11,12 +11,27 @@ interface TextEnvelope {
   body: string;
 }
 
+interface FileEnvelope {
+  type: "file";
+  id: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  data: number[];
+}
+
 interface ReceiptEnvelope {
   type: "delivered" | "read";
   refId: string;
 }
 
-type Envelope = TextEnvelope | ReceiptEnvelope;
+type Envelope = TextEnvelope | FileEnvelope | ReceiptEnvelope;
+
+export const MAX_FILE_BYTES = 8 * 1024 * 1024;
+
+export function isFileTooLarge(file: File): boolean {
+  return file.size > MAX_FILE_BYTES;
+}
 
 /** Opens the local store, restoring any persisted session, and establishes one with the contact if needed. */
 export async function startConversation(contactId: string, account: LocalAccount): Promise<SignalStore> {
@@ -43,16 +58,58 @@ export async function sendText(contactId: string, text: string, account: LocalAc
   return messages;
 }
 
+export type FileSendStage = "encrypting" | "sending" | "sent";
+
+export async function sendFile(
+  contactId: string,
+  file: File,
+  account: LocalAccount,
+  store: SignalStore,
+  onStage: (stage: FileSendStage) => void,
+): Promise<ChatMessage[]> {
+  onStage("encrypting");
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const envelope: FileEnvelope = {
+    type: "file",
+    id: crypto.randomUUID(),
+    filename: file.name,
+    mimeType: file.type || "application/octet-stream",
+    size: file.size,
+    data: Array.from(bytes),
+  };
+  const plaintext = new TextEncoder().encode(JSON.stringify(envelope));
+  const ciphertext = store.encrypt(contactId, plaintext);
+
+  onStage("sending");
+  await sendMessage(contactId, ciphertext, account);
+  await persistSession(store, contactId);
+
+  const messages = await loadMessages(contactId);
+  messages.push({
+    id: envelope.id,
+    direction: "sent",
+    text: "",
+    status: "sent",
+    createdAt: new Date().toISOString(),
+    file: { filename: envelope.filename, mimeType: envelope.mimeType, size: envelope.size, bytes },
+  });
+  await saveMessages(contactId, messages);
+  onStage("sent");
+  return messages;
+}
+
 /**
  * Fetches and decrypts any pending messages, updates local history, and
  * replies with receipts. ponytail: delivered and read are sent together as
  * soon as a text message is decrypted, since polling only happens while the
  * conversation screen is open - there's no background-delivery state yet to
- * tell the two apart. Split them once there's a reason to.
+ * tell the two apart. Split them once there's a reason to. Files don't get
+ * delivered/read receipts at all yet - only text does; add them if file
+ * status tracking turns out to matter.
  */
 export async function poll(contactId: string, account: LocalAccount, store: SignalStore): Promise<ChatMessage[]> {
   const received = await fetchMessages(account);
-  let messages = await loadMessages(contactId);
+  const messages = await loadMessages(contactId);
 
   for (const message of received) {
     if (message.senderAccountId !== contactId) {
@@ -76,6 +133,15 @@ export async function poll(contactId: string, account: LocalAccount, store: Sign
         const receiptCiphertext = store.encrypt(contactId, new TextEncoder().encode(JSON.stringify(receipt)));
         await sendMessage(contactId, receiptCiphertext, account);
       }
+    } else if (envelope.type === "file") {
+      messages.push({
+        id: envelope.id,
+        direction: "received",
+        text: "",
+        status: "delivered",
+        createdAt: message.createdAt,
+        file: { filename: envelope.filename, mimeType: envelope.mimeType, size: envelope.size, bytes: Uint8Array.from(envelope.data) },
+      });
     } else {
       const target = messages.find((m) => m.id === envelope.refId && m.direction === "sent");
       if (target) target.status = envelope.type;
