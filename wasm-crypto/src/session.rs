@@ -7,7 +7,7 @@ use libsignal_protocol::{
     GenericSignedPreKey, IdentityKey, IdentityKeyPair, InMemSignalProtocolStore,
     KeyPair, KyberPreKeyId, KyberPreKeyRecord, KyberPreKeyStore, PreKeyBundle, PreKeyId,
     PreKeyRecord, PreKeyStore, PreKeySignalMessage, PrivateKey, ProtocolAddress, PublicKey,
-    SessionStore, SignalMessage, SignedPreKeyId, SignedPreKeyRecord, SignedPreKeyStore, Timestamp,
+    SessionRecord, SessionStore, SignalMessage, SignedPreKeyId, SignedPreKeyRecord, SignedPreKeyStore, Timestamp,
 };
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
@@ -190,6 +190,23 @@ impl SignalStore {
         let remote = address(&contact_id);
         let session = block_on(self.inner.session_store.load_session(&remote)).map_err(js_err)?;
         Ok(session.is_some())
+    }
+
+    /// Serializes the session with `contact_id`, if one exists, so the caller
+    /// can persist it (e.g. to IndexedDB) and restore it on the next page
+    /// load - a session's ratchet state changes on every encrypt/decrypt, so
+    /// this should be called again after each one.
+    pub fn export_session(&self, contact_id: String) -> Result<Option<Vec<u8>>, JsValue> {
+        let remote = address(&contact_id);
+        let session = block_on(self.inner.session_store.load_session(&remote)).map_err(js_err)?;
+        session.map(|s| s.serialize().map_err(js_err)).transpose()
+    }
+
+    /// Restores a session previously returned by `export_session`.
+    pub fn import_session(&mut self, contact_id: String, bytes: Vec<u8>) -> Result<(), JsValue> {
+        let remote = address(&contact_id);
+        let record = SessionRecord::deserialize(&bytes).map_err(js_err)?;
+        block_on(self.inner.session_store.store_session(&remote, &record)).map_err(js_err)
     }
 
     /// Double Ratchet encrypt. The returned bytes are prefixed with a single

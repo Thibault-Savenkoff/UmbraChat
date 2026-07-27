@@ -68,6 +68,21 @@ const decrypted2 = bobStore.decrypt("alice", envelope2);
 const decryptedText2 = new TextDecoder().decode(decrypted2);
 check("bob decrypts alice's second message correctly", decryptedText2 === "second message, session now acknowledged", decryptedText2);
 
+// A fresh store (simulating a page reload) has no session until one is imported.
+const aliceReloaded = new SignalStore(aliceBundle);
+check("reloaded store has no session before import", aliceReloaded.has_session("bob") === false);
+
+const exported = aliceStore.export_session("bob");
+check("export_session returns bytes for an established session", exported instanceof Uint8Array && exported.length > 0);
+
+aliceReloaded.import_session("bob", exported);
+check("reloaded store has the session after import", aliceReloaded.has_session("bob") === true);
+
+const plaintext3 = new TextEncoder().encode("third message, after simulated reload");
+const envelope3 = aliceReloaded.encrypt("bob", plaintext3);
+const decrypted3 = new TextDecoder().decode(bobStore.decrypt("alice", envelope3));
+check("bob decrypts a message from the reloaded (imported) session correctly", decrypted3 === "third message, after simulated reload", decrypted3);
+
 let failed = false;
 for (const [label, ok, detail] of checks) {
   console.log(`${ok ? "PASS" : "FAIL"}: ${label}${ok ? "" : ` (${detail})`}`);
