@@ -1,6 +1,6 @@
 ---
 objective: "A new user can create an UmbraChat account from the web app, with identity keys generated on-device and only public key material ever reaching the server."
-status: in-progress
+status: implemented
 ---
 
 # Plan: Account & device identity creation
