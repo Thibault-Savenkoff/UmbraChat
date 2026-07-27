@@ -1,6 +1,6 @@
 ---
 objective: "Two users, each with a set-up identity, can exchange E2E encrypted text messages, with sent/delivered/read status, while the server only ever handles opaque ciphertext and retains nothing longer than delivery requires."
-status: in-progress
+status: implemented
 ---
 
 # Plan: Send/receive E2E encrypted text messages (1:1)
