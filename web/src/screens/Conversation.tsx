@@ -83,7 +83,13 @@ export function Conversation({ messages, onSend, onSendFile, onSetTimer, sending
       <h1>Conversation</h1>
       <label>
         ⏱
-        <select data-testid="timer-picker" value={timerSeconds} onChange={(e) => onSetTimer(Number(e.target.value))}>
+        <select
+          data-testid="timer-picker"
+          aria-label="Disappearing message timer"
+          value={timerSeconds}
+          onChange={(e) => onSetTimer(Number(e.target.value))}
+          disabled={sending}
+        >
           {TIMER_OPTIONS.map(([seconds, label]) => (
             <option key={seconds} value={seconds}>
               {label}
