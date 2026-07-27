@@ -6,10 +6,20 @@ interface ConversationProps {
   messages: ChatMessage[];
   onSend: (text: string) => void;
   onSendFile: (file: File) => void;
+  onSetTimer: (seconds: number) => void;
   sending: boolean;
   fileStage?: FileSendStage;
+  timerSeconds: number;
   error?: string;
 }
+
+const TIMER_OPTIONS: [number, string][] = [
+  [0, "Off"],
+  [30, "30s"],
+  [5 * 60, "5m"],
+  [60 * 60, "1h"],
+  [24 * 60 * 60, "1d"],
+];
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
@@ -45,7 +55,7 @@ function FileMessage({ message }: { message: ChatMessage }) {
   );
 }
 
-export function Conversation({ messages, onSend, onSendFile, sending, fileStage, error }: ConversationProps) {
+export function Conversation({ messages, onSend, onSendFile, onSetTimer, sending, fileStage, timerSeconds, error }: ConversationProps) {
   const [text, setText] = useState("");
   const [fileError, setFileError] = useState<string>();
 
@@ -71,10 +81,21 @@ export function Conversation({ messages, onSend, onSendFile, sending, fileStage,
   return (
     <main>
       <h1>Conversation</h1>
+      <label>
+        ⏱
+        <select data-testid="timer-picker" value={timerSeconds} onChange={(e) => onSetTimer(Number(e.target.value))}>
+          {TIMER_OPTIONS.map(([seconds, label]) => (
+            <option key={seconds} value={seconds}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
       <ul data-testid="message-list">
         {messages.map((m) => (
           <li key={m.id} data-testid={`message-${m.direction}`}>
             {m.file ? <FileMessage message={m} /> : <span>{m.text}</span>}
+            {!m.file && (m.timerSeconds || m.expiresAt) && <span data-testid="disappearing-marker"> ⏱</span>}
             {m.direction === "sent" && !m.file && <span data-testid="message-status"> ({m.status})</span>}
           </li>
         ))}

@@ -4,7 +4,7 @@ import { generateIdentity, computeSafetyNumber } from "./crypto/identity";
 import { loadAccount, saveAccount, type LocalAccount } from "./storage/keyStore";
 import { loadMessages, type ChatMessage } from "./storage/messageStore";
 import { registerAccount } from "./api/register";
-import { startConversation, sendText, sendFile, poll, type FileSendStage } from "./chat/conversation";
+import { startConversation, sendText, sendFile, poll, getTimerSeconds, setDisappearingTimer, type FileSendStage } from "./chat/conversation";
 import { CreateAccount } from "./screens/CreateAccount";
 import { SafetyNumber } from "./screens/SafetyNumber";
 import { NewConversation } from "./screens/NewConversation";
@@ -25,6 +25,7 @@ function App() {
   const [starting, setStarting] = useState(false);
   const [sending, setSending] = useState(false);
   const [fileStage, setFileStage] = useState<FileSendStage>();
+  const [timerSeconds, setTimerSecondsState] = useState(0);
   const [error, setError] = useState<string>();
   const pollTimer = useRef<number>(undefined);
 
@@ -50,11 +51,13 @@ function App() {
     const store = await startConversation(contactId, account);
     const messages = await loadMessages(contactId);
     setState({ status: "conversation", account, contactId, store, messages });
+    setTimerSecondsState(getTimerSeconds(contactId));
     localStorage.setItem(ACTIVE_CONTACT_KEY, contactId);
 
     const runPoll = async () => {
       const updated = await poll(contactId, account, store);
       setState((s) => (s.status === "conversation" ? { ...s, messages: updated } : s));
+      setTimerSecondsState(getTimerSeconds(contactId));
     };
 
     window.clearInterval(pollTimer.current);
@@ -123,6 +126,12 @@ function App() {
     }
   }
 
+  async function handleSetTimer(seconds: number) {
+    if (state.status !== "conversation") return;
+    setTimerSecondsState(seconds);
+    await setDisappearingTimer(state.contactId, seconds, state.account, state.store);
+  }
+
   if (state.status === "loading") return null;
 
   if (state.status === "anonymous") {
@@ -143,8 +152,10 @@ function App() {
       messages={state.messages}
       onSend={handleSend}
       onSendFile={handleSendFile}
+      onSetTimer={handleSetTimer}
       sending={sending}
       fileStage={fileStage}
+      timerSeconds={timerSeconds}
       error={error}
     />
   );
