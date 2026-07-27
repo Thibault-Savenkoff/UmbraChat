@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use http_body_util::BodyExt;
-use libsignal_protocol::{IdentityKeyPair, KeyPair};
+use libsignal_protocol::{kem, IdentityKeyPair, KeyPair};
 use rand::Rng;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -57,6 +57,10 @@ pub async fn register_account(app: &axum::Router) -> TestAccount {
     let signed_prekey_public = signed_prekey.public_key.serialize();
     let signature = identity.private_key().calculate_signature(&signed_prekey_public, &mut rng).unwrap();
 
+    let kyber_prekey = kem::KeyPair::generate(kem::KeyType::Kyber1024, &mut rng);
+    let kyber_prekey_public = kyber_prekey.public_key.serialize();
+    let kyber_signature = identity.private_key().calculate_signature(&kyber_prekey_public, &mut rng).unwrap();
+
     let body = json!({
         "identity_public_key": STANDARD.encode(identity.identity_key().serialize()),
         "registration_id": rng.random_range(1u32..16384),
@@ -64,6 +68,11 @@ pub async fn register_account(app: &axum::Router) -> TestAccount {
             "key_id": 1,
             "public_key": STANDARD.encode(&signed_prekey_public),
             "signature": STANDARD.encode(&signature),
+        },
+        "kyber_signed_prekey": {
+            "key_id": 1,
+            "public_key": STANDARD.encode(&kyber_prekey_public),
+            "signature": STANDARD.encode(&kyber_signature),
         },
         "one_time_prekeys": [
             { "key_id": 1, "public_key": STANDARD.encode(one_time_prekey.public_key.serialize()) }

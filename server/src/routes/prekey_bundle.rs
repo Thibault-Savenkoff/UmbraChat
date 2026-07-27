@@ -28,6 +28,9 @@ pub struct PrekeyBundleResponse {
     pub identity_public_key: String, // base64
     pub registration_id: i32,
     pub signed_prekey: SignedPrekeyOut,
+    // Post-quantum prekey, mandatory: libsignal-protocol's session establishment
+    // uses PQXDH, not classic X3DH.
+    pub kyber_signed_prekey: SignedPrekeyOut,
     pub one_time_prekey: Option<OneTimePrekeyOut>,
 }
 
@@ -54,6 +57,15 @@ pub async fn get_prekey_bundle(
     .map_err(|_| server_error())?
     .ok_or_else(|| not_found("account has no signed prekey"))?;
 
+    let kyber_signed_prekey = sqlx::query!(
+        "SELECT key_id, public_key, signature FROM kyber_signed_prekeys WHERE account_id = $1",
+        account_id
+    )
+    .fetch_optional(&pool)
+    .await
+    .map_err(|_| server_error())?
+    .ok_or_else(|| not_found("account has no kyber signed prekey"))?;
+
     let one_time_prekey = sqlx::query!(
         r#"
         UPDATE prekeys
@@ -76,6 +88,11 @@ pub async fn get_prekey_bundle(
             key_id: signed_prekey.key_id,
             public_key: STANDARD.encode(signed_prekey.public_key),
             signature: STANDARD.encode(signed_prekey.signature),
+        },
+        kyber_signed_prekey: SignedPrekeyOut {
+            key_id: kyber_signed_prekey.key_id,
+            public_key: STANDARD.encode(kyber_signed_prekey.public_key),
+            signature: STANDARD.encode(kyber_signed_prekey.signature),
         },
         one_time_prekey: one_time_prekey.map(|k| OneTimePrekeyOut {
             key_id: k.key_id,

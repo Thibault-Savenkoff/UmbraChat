@@ -92,6 +92,7 @@ async fn prekey_bundle_never_hands_out_the_same_one_time_prekey_twice() {
     let (status1, body1) = request(&app, "GET", &path, &refs1, json!(null)).await;
     assert_eq!(status1, axum::http::StatusCode::OK);
     assert!(body1["one_time_prekey"].is_object(), "first fetch should hand out the one registered one-time prekey");
+    assert!(body1["kyber_signed_prekey"]["public_key"].is_string(), "bundle must include the kyber prekey (PQXDH requires it)");
 
     let (timestamp2, signature2) = sign(&bob.identity, "GET", &path, b"");
     let headers2 = [
