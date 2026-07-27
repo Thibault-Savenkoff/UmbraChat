@@ -1,4 +1,4 @@
-use libsignal_protocol::{kem, IdentityKeyPair, KeyPair};
+use libsignal_protocol::{kem, IdentityKeyPair, KeyPair, PrivateKey};
 use rand::Rng;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -97,4 +97,16 @@ pub fn generate_identity_bundle(one_time_prekey_count: u32) -> Result<JsValue, J
     };
 
     serde_wasm_bindgen::to_value(&bundle).map_err(|e| JsValue::from_str(&format!("serialization failed: {e}")))
+}
+
+/// Signs arbitrary bytes with an identity private key, for the server's
+/// per-request signature auth (method+path+timestamp+body-hash).
+#[wasm_bindgen]
+pub fn sign_with_identity(identity_private_key: Vec<u8>, message: Vec<u8>) -> Result<Vec<u8>, JsValue> {
+    let private_key = PrivateKey::deserialize(&identity_private_key).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let mut rng = rand::rng();
+    let signature = private_key
+        .calculate_signature(&message, &mut rng)
+        .map_err(|e| JsValue::from_str(&format!("failed to sign: {e}")))?;
+    Ok(signature.to_vec())
 }
