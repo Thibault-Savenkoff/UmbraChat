@@ -11,6 +11,9 @@ use uuid::Uuid;
 use crate::error::{server_error, unauthorized, ApiError};
 
 const MAX_CLOCK_SKEW_SECS: i64 = 300;
+// 8MB raw file cap (see chat/conversation.ts) plus base64's ~33% overhead plus
+// JSON/envelope overhead, with headroom.
+const MAX_BODY_BYTES: usize = 12 * 1024 * 1024;
 
 /// Verifies a request signed by the caller's identity private key: the signed
 /// message is `METHOD\nPATH\nTIMESTAMP\nSHA256_HEX(BODY)`, checked against the
@@ -107,7 +110,7 @@ where
         let timestamp = header_str(&parts, "x-timestamp")?.to_string();
         let signature = header_str(&parts, "x-signature")?.to_string();
 
-        let body_bytes = axum::body::to_bytes(body, 1_000_000)
+        let body_bytes = axum::body::to_bytes(body, MAX_BODY_BYTES)
             .await
             .map_err(|_| unauthorized("failed to read request body"))?;
 
