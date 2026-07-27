@@ -15,6 +15,9 @@ export interface IdentityBundle {
   identity_private_key: number[];
   registration_id: number;
   signed_prekey: SignedPrekeyBundle;
+  // Post-quantum prekey, mandatory: libsignal-protocol's session establishment
+  // uses PQXDH, not classic X3DH.
+  kyber_signed_prekey: SignedPrekeyBundle;
   one_time_prekeys: PrekeyBundle[];
 }
 

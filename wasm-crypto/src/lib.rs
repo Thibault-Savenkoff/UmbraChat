@@ -1,4 +1,4 @@
-use libsignal_protocol::{IdentityKeyPair, KeyPair};
+use libsignal_protocol::{kem, IdentityKeyPair, KeyPair};
 use rand::Rng;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -24,13 +24,16 @@ pub struct IdentityBundle {
     identity_private_key: Vec<u8>,
     registration_id: u32,
     signed_prekey: SignedPrekeyOutput,
+    // Post-quantum prekey, mandatory: libsignal-protocol's session establishment
+    // uses PQXDH, not classic X3DH, and requires one to build a valid bundle.
+    kyber_signed_prekey: SignedPrekeyOutput,
     one_time_prekeys: Vec<PrekeyOutput>,
 }
 
-/// Generates a fresh identity key pair, registration id, signed prekey, and a
-/// batch of one-time prekeys, all locally. Private key material is included
-/// in the result and never leaves this call boundary except into the caller's
-/// own device storage.
+/// Generates a fresh identity key pair, registration id, signed prekey (classic
+/// and post-quantum), and a batch of one-time prekeys, all locally. Private key
+/// material is included in the result and never leaves this call boundary
+/// except into the caller's own device storage.
 #[wasm_bindgen]
 pub fn generate_identity_bundle(one_time_prekey_count: u32) -> Result<JsValue, JsValue> {
     let mut rng = rand::rng();
@@ -52,6 +55,20 @@ pub fn generate_identity_bundle(one_time_prekey_count: u32) -> Result<JsValue, J
         signature: signature.to_vec(),
     };
 
+    let kyber_prekey_pair = kem::KeyPair::generate(kem::KeyType::Kyber1024, &mut rng);
+    let kyber_prekey_public = kyber_prekey_pair.public_key.serialize();
+    let kyber_signature = identity
+        .private_key()
+        .calculate_signature(&kyber_prekey_public, &mut rng)
+        .map_err(|e| JsValue::from_str(&format!("failed to sign kyber prekey: {e}")))?;
+
+    let kyber_signed_prekey = SignedPrekeyOutput {
+        key_id: 1,
+        public_key: kyber_prekey_public.to_vec(),
+        private_key: kyber_prekey_pair.secret_key.serialize().to_vec(),
+        signature: kyber_signature.to_vec(),
+    };
+
     let mut one_time_prekeys = Vec::with_capacity(one_time_prekey_count as usize);
     for key_id in 1..=one_time_prekey_count {
         let pair = KeyPair::generate(&mut rng);
@@ -67,6 +84,7 @@ pub fn generate_identity_bundle(one_time_prekey_count: u32) -> Result<JsValue, J
         identity_private_key: identity.private_key().serialize(),
         registration_id,
         signed_prekey,
+        kyber_signed_prekey,
         one_time_prekeys,
     };
 

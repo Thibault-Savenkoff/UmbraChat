@@ -9,6 +9,8 @@ const checks = [
   ["registration_id is a number", typeof bundle.registration_id === "number"],
   ["signed_prekey.public_key non-empty", bundle.signed_prekey.public_key.length > 0],
   ["signed_prekey.signature non-empty", bundle.signed_prekey.signature.length > 0],
+  ["kyber_signed_prekey.public_key non-empty", bundle.kyber_signed_prekey.public_key.length > 0],
+  ["kyber_signed_prekey.signature non-empty", bundle.kyber_signed_prekey.signature.length > 0],
   ["one_time_prekeys has 5 entries", bundle.one_time_prekeys.length === 5],
   ["each one_time_prekey has a public_key", bundle.one_time_prekeys.every((k) => k.public_key.length > 0)],
 ];

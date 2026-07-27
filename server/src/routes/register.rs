@@ -1,6 +1,6 @@
 use axum::{extract::State, http::StatusCode, Json};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use libsignal_protocol::{IdentityKey, PublicKey};
+use libsignal_protocol::{kem, IdentityKey, PublicKey};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -23,6 +23,10 @@ pub struct RegisterRequest {
     pub identity_public_key: String, // base64
     pub registration_id: i32,
     pub signed_prekey: SignedPrekeyDto,
+    // Post-quantum prekey, mandatory: libsignal-protocol's session establishment
+    // (process_prekey_bundle) requires one, this project's Signal protocol version
+    // uses PQXDH rather than classic X3DH.
+    pub kyber_signed_prekey: SignedPrekeyDto,
     pub one_time_prekeys: Vec<PrekeyDto>,
 }
 
@@ -77,6 +81,20 @@ pub async fn register(
         ));
     }
 
+    let kyber_public_key_bytes = STANDARD
+        .decode(&req.kyber_signed_prekey.public_key)
+        .map_err(|_| bad_request("kyber_signed_prekey.public_key is not valid base64"))?;
+    let kyber_signature_bytes = STANDARD
+        .decode(&req.kyber_signed_prekey.signature)
+        .map_err(|_| bad_request("kyber_signed_prekey.signature is not valid base64"))?;
+    kem::PublicKey::deserialize(&kyber_public_key_bytes)
+        .map_err(|_| bad_request("kyber_signed_prekey.public_key is not a valid Kyber key"))?;
+    if !identity_key.public_key().verify_signature(&kyber_public_key_bytes, &kyber_signature_bytes) {
+        return Err(bad_request(
+            "kyber_signed_prekey signature does not verify against identity_public_key",
+        ));
+    }
+
     if req.one_time_prekeys.len() > MAX_ONE_TIME_PREKEYS {
         return Err(bad_request("too many one_time_prekeys in a single registration"));
     }
@@ -113,6 +131,17 @@ pub async fn register(
         req.signed_prekey.key_id,
         signed_prekey_bytes,
         signature_bytes,
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|_| server_error())?;
+
+    sqlx::query!(
+        "INSERT INTO kyber_signed_prekeys (account_id, key_id, public_key, signature) VALUES ($1, $2, $3, $4)",
+        account_id,
+        req.kyber_signed_prekey.key_id,
+        kyber_public_key_bytes,
+        kyber_signature_bytes,
     )
     .execute(&mut *tx)
     .await

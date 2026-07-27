@@ -25,7 +25,7 @@ UmbraChat is an open-source, self-hostable messenger built for people who want S
 - **Mobile:** Swift on iOS (official libsignal Swift bindings), Kotlin on Android (official libsignal Java bindings) — sideloaded (AltStore/SideStore on iOS, direct APK on Android), no app-store fees
 - **Back-end:** Rust, Axum + Tokio, `libsignal-client` crate, `sqlx`
 - **Database:** PostgreSQL 16
-- **Auth:** libsignal identity keys (X3DH + Double Ratchet), no third-party provider
+- **Auth:** libsignal identity keys (PQXDH + Double Ratchet), no third-party provider
 - **Hosting:** Self-hosted VM (Oracle Cloud Always Free ARM or equivalent) for the server + Postgres; Vercel free tier for the web PWA
 - **Key integrations:** coturn (TURN relay for WebRTC calls)
 

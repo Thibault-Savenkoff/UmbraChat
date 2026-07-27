@@ -18,6 +18,11 @@ export async function registerAccount(identity: IdentityBundle): Promise<string>
       public_key: toBase64(identity.signed_prekey.public_key),
       signature: toBase64(identity.signed_prekey.signature),
     },
+    kyber_signed_prekey: {
+      key_id: identity.kyber_signed_prekey.key_id,
+      public_key: toBase64(identity.kyber_signed_prekey.public_key),
+      signature: toBase64(identity.kyber_signed_prekey.signature),
+    },
     one_time_prekeys: identity.one_time_prekeys.map((k) => ({
       key_id: k.key_id,
       public_key: toBase64(k.public_key),

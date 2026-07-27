@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use http_body_util::BodyExt;
-use libsignal_protocol::{IdentityKeyPair, KeyPair};
+use libsignal_protocol::{kem, IdentityKeyPair, KeyPair};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 use umbrachat_server::{db, routes};
@@ -15,11 +15,18 @@ fn valid_register_body() -> Value {
     let identity = IdentityKeyPair::generate(&mut rng);
     let signed_prekey = KeyPair::generate(&mut rng);
     let one_time_prekey = KeyPair::generate(&mut rng);
+    let kyber_prekey = kem::KeyPair::generate(kem::KeyType::Kyber1024, &mut rng);
 
     let signed_prekey_public = signed_prekey.public_key.serialize();
     let signature = identity
         .private_key()
         .calculate_signature(&signed_prekey_public, &mut rng)
+        .expect("signing must succeed");
+
+    let kyber_prekey_public = kyber_prekey.public_key.serialize();
+    let kyber_signature = identity
+        .private_key()
+        .calculate_signature(&kyber_prekey_public, &mut rng)
         .expect("signing must succeed");
 
     json!({
@@ -29,6 +36,11 @@ fn valid_register_body() -> Value {
             "key_id": 1,
             "public_key": STANDARD.encode(&signed_prekey_public),
             "signature": STANDARD.encode(&signature),
+        },
+        "kyber_signed_prekey": {
+            "key_id": 1,
+            "public_key": STANDARD.encode(&kyber_prekey_public),
+            "signature": STANDARD.encode(&kyber_signature),
         },
         "one_time_prekeys": [
             {
@@ -93,6 +105,40 @@ async fn register_with_invalid_signature_returns_4xx_and_persists_nothing() {
     assert!(response.status().is_client_error());
 
     // Nothing should have been persisted for this identity key.
+    let identity_public_key = body["identity_public_key"].as_str().unwrap();
+    let identity_key_bytes = STANDARD.decode(identity_public_key).unwrap();
+    let pool = db::connect().await;
+    let count: i64 = sqlx::query_scalar!(
+        "SELECT count(*) FROM identity_keys WHERE public_key = $1",
+        identity_key_bytes
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .unwrap_or(0);
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn register_with_invalid_kyber_signature_returns_4xx_and_persists_nothing() {
+    let app = app().await;
+    let mut body = valid_register_body();
+    body["kyber_signed_prekey"]["signature"] = json!(STANDARD.encode([0u8; 64]));
+
+    let response = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/v1/register")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert!(response.status().is_client_error());
+
     let identity_public_key = body["identity_public_key"].as_str().unwrap();
     let identity_key_bytes = STANDARD.decode(identity_public_key).unwrap();
     let pool = db::connect().await;
