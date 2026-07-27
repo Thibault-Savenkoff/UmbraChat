@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "e2e": "node e2e-smoketest.mjs"
+    "e2e": "node e2e-smoketest.mjs",
+    "e2e:messaging": "node e2e-messaging.mjs"
   },
   "dependencies": {
     "react": "^19.2.7",

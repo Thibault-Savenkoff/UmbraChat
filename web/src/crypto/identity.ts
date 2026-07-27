@@ -1,4 +1,4 @@
-import init, { generate_identity_bundle } from "wasm-crypto";
+import init, { generate_identity_bundle, sign_with_identity } from "wasm-crypto";
 
 export interface PrekeyBundle {
   key_id: number;
@@ -23,7 +23,7 @@ export interface IdentityBundle {
 
 let initialized: Promise<unknown> | undefined;
 
-async function ensureInit(): Promise<void> {
+export async function ensureInit(): Promise<void> {
   initialized ??= init();
   await initialized;
 }
@@ -31,6 +31,11 @@ async function ensureInit(): Promise<void> {
 export async function generateIdentity(oneTimePrekeyCount = 10): Promise<IdentityBundle> {
   await ensureInit();
   return generate_identity_bundle(oneTimePrekeyCount) as IdentityBundle;
+}
+
+export async function signWithIdentity(privateKey: number[], message: Uint8Array): Promise<Uint8Array> {
+  await ensureInit();
+  return sign_with_identity(Uint8Array.from(privateKey), message);
 }
 
 /**
