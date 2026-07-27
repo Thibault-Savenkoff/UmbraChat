@@ -60,7 +60,14 @@ async fn register_with_valid_bundle_returns_201() {
 
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     let json: Value = serde_json::from_slice(&bytes).unwrap();
-    assert!(json["account_id"].is_string());
+    let account_id: uuid::Uuid = json["account_id"].as_str().expect("account_id must be a string").parse().unwrap();
+
+    // Clean up so repeated test runs don't accumulate rows in the dev database.
+    let pool = db::connect().await;
+    sqlx::query!("DELETE FROM accounts WHERE id = $1", account_id)
+        .execute(&pool)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -98,4 +105,32 @@ async fn register_with_invalid_signature_returns_4xx_and_persists_nothing() {
     .unwrap()
     .unwrap_or(0);
     assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn register_with_too_many_one_time_prekeys_returns_4xx() {
+    let app = app().await;
+    let mut body = valid_register_body();
+    let mut rng = rand::rng();
+    let extra_prekeys: Vec<Value> = (0..101)
+        .map(|i| {
+            let pair = KeyPair::generate(&mut rng);
+            json!({ "key_id": i, "public_key": STANDARD.encode(pair.public_key.serialize()) })
+        })
+        .collect();
+    body["one_time_prekeys"] = json!(extra_prekeys);
+
+    let response = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/v1/register")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert!(response.status().is_client_error());
 }

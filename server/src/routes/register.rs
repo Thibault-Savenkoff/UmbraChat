@@ -36,6 +36,8 @@ pub struct ErrorResponse {
     pub error: String,
 }
 
+const MAX_ONE_TIME_PREKEYS: usize = 100;
+
 type ApiError = (StatusCode, Json<ErrorResponse>);
 
 fn bad_request(msg: &str) -> ApiError {
@@ -73,6 +75,10 @@ pub async fn register(
         return Err(bad_request(
             "signed_prekey signature does not verify against identity_public_key",
         ));
+    }
+
+    if req.one_time_prekeys.len() > MAX_ONE_TIME_PREKEYS {
+        return Err(bad_request("too many one_time_prekeys in a single registration"));
     }
 
     let mut one_time_prekeys = Vec::with_capacity(req.one_time_prekeys.len());

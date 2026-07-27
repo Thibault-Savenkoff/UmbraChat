@@ -5,19 +5,26 @@ import { registerAccount } from "./api/register";
 import { CreateAccount } from "./screens/CreateAccount";
 import { SafetyNumber } from "./screens/SafetyNumber";
 
+type AccountStatus =
+  | { status: "loading" }
+  | { status: "anonymous" }
+  | { status: "ready"; identity: IdentityBundle; safetyNumber: string };
+
 function App() {
-  const [identity, setIdentity] = useState<IdentityBundle | null | undefined>(undefined);
-  const [safetyNumber, setSafetyNumber] = useState<string | null>(null);
+  const [account, setAccount] = useState<AccountStatus>({ status: "loading" });
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string>();
 
   useEffect(() => {
-    loadIdentity().then((existing) => setIdentity(existing ?? null));
+    loadIdentity().then(async (existing) => {
+      if (!existing) {
+        setAccount({ status: "anonymous" });
+        return;
+      }
+      const safetyNumber = await computeSafetyNumber(existing.identity_public_key);
+      setAccount({ status: "ready", identity: existing, safetyNumber });
+    });
   }, []);
-
-  useEffect(() => {
-    if (identity) computeSafetyNumber(identity.identity_public_key).then(setSafetyNumber);
-  }, [identity]);
 
   async function handleCreate() {
     setCreating(true);
@@ -26,7 +33,8 @@ function App() {
       const generated = await generateIdentity();
       await registerAccount(generated);
       await saveIdentity(generated);
-      setIdentity(generated);
+      const safetyNumber = await computeSafetyNumber(generated.identity_public_key);
+      setAccount({ status: "ready", identity: generated, safetyNumber });
     } catch (err) {
       setError(err instanceof Error ? err.message : "registration failed");
     } finally {
@@ -34,10 +42,10 @@ function App() {
     }
   }
 
-  if (identity === undefined) return null;
+  if (account.status === "loading") return null;
 
-  if (identity && safetyNumber) {
-    return <SafetyNumber safetyNumber={safetyNumber} />;
+  if (account.status === "ready") {
+    return <SafetyNumber safetyNumber={account.safetyNumber} />;
   }
 
   return <CreateAccount onCreate={handleCreate} creating={creating} error={error} />;
