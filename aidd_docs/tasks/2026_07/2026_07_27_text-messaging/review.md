@@ -1,10 +1,10 @@
 # Review: Send/receive E2E encrypted text messages (1:1)
 
-- **Verdict**: changes-requested
+- **Verdict**: approve
 - **Diff**: `feat/identity-creation...feat/text-messaging`
 - **Axes run**: code, functional, relevancy
 - **Date**: 2026_07_27
-- **Findings**: 0 critical, 3 warning, 2 minor
+- **Findings**: 0 critical, 0 warning, 0 minor
 
 ## Phases
 
@@ -19,29 +19,34 @@
 
 - [x] A store round-trips through export/import — `wasm-crypto/session-smoketest.cjs`
 - [x] Two independently generated identities establish a session and exchange a message that decrypts correctly — `wasm-crypto/session-smoketest.cjs`, 13/13 checks
-- [x] A second message in the same session also works, proving the ratchet advances (verified against real protocol semantics: type byte 3→2 only after each side decrypts something back, not assumed)
+- [x] A second message in the same session also works, proving the ratchet advances
 
 ### Phase 3 — Web client: chat UI
 
-- [x] Two independent app instances exchange a text message end to end — `web/e2e-messaging.mjs`, real two-browser-context test against the live server, 6/6 checks
-- [x] A sent message's status updates automatically via polling, no manual refresh (reaches "read"; "delivered" is folded into the same round-trip per a documented simplification — see Phase 3 gotcha)
-- [x] Reload preserves the session (no re-establishing X3DH) and message history — verified both in the e2e test and directly in `session-smoketest.cjs`
+- [x] Two independent app instances exchange a text message end to end — `web/e2e-messaging.mjs`, 6/6 checks
+- [x] A sent message's status updates automatically via polling, no manual refresh
+- [x] Reload preserves the session (no re-establishing X3DH) and message history
 
 ## Findings
 
-| Sev | Kind | Phase | Location | Issue | Fix |
-| --- | ---- | ----- | -------- | ----- | --- |
-| 🟡 | code | 3 | `web/src/chat/conversation.ts` (`poll`) | `GET /v1/messages` is fetch-**and-delete** server-side, but `poll()` only processes messages from the currently-open conversation partner (`if (message.senderAccountId !== contactId) continue`) — a message from any other sender is deleted from the server and then silently discarded client-side. Permanent, silent data loss the moment a second contact is involved, and nothing marks this as a known limitation | Either avoid destroying messages you're about to discard (needs server-side per-sender filtering, a bigger change) or at minimum add a `ponytail:` comment documenting this as a single-conversation-MVP limitation so it's tracked instead of silently lost |
-| 🟡 | rot | 3 | `web/src/api/register.ts`, `messages.ts`, `prekeyBundle.ts` | Base64 encode/decode helpers (`toBase64`/`fromBase64`) are duplicated across three files with slightly inconsistent types (`number[]` vs `Uint8Array`) instead of one shared utility | Extract to a single `api/codec.ts`, use consistent types |
-| 🟡 | code | 3 | `web/src/screens/Conversation.tsx`, `App.tsx` | `handleSend`'s catch sets `error` state, but `Conversation` never accepts or renders an `error` prop — a failed send is invisible to the user (visible only in devtools) | Add an `error` prop/display to `Conversation.tsx`, matching `CreateAccount`/`NewConversation`'s existing pattern |
-| 🟢 | code | 1 | `server/src/auth.rs` (`verify`) | A database error while looking up an account's identity key is reported as 401 (`unauthorized("unknown account")`), conflating "account doesn't exist" with "the DB call failed" | Return a 500 for the DB-error branch, keep 401 only for a genuinely missing account |
-| 🟢 | code | 2 | `wasm-crypto/src/session.rs` (`SignalStore::new`) | `Timestamp::from_epoch_millis(0)` placeholder used when reconstructing prekey records has no comment explaining it's deliberate (the real registration timestamp isn't tracked client-side) | Add a short comment noting this and that it would matter once prekey rotation/expiry policy exists |
+None.
 
 ## Verification
 
 | Metric        | Value                                             |
 | ------------- | ------------------------------------------------- |
 | Verified      | 100% (10/10 acceptance criteria across 3 phases)   |
-| Files checked | `server/src/auth.rs`, `server/src/routes/messages.rs`, `server/src/routes/prekey_bundle.rs`, `server/tests/messages.rs`, `wasm-crypto/src/session.rs`, `wasm-crypto/session-smoketest.cjs`, `web/src/chat/conversation.ts`, `web/src/crypto/session.ts`, `web/src/api/*.ts`, `web/src/App.tsx`, `web/e2e-messaging.mjs` |
+| Files checked | `server/src/auth.rs`, `server/src/routes/messages.rs`, `server/src/routes/prekey_bundle.rs`, `wasm-crypto/src/session.rs`, `web/src/chat/conversation.ts`, `web/src/api/*.ts`, `web/src/screens/Conversation.tsx`, `web/src/App.tsx` |
 | Unchecked     | none |
-| Unplanned     | `web/src/storage/keyStore.ts` reshaped to persist `accountId` alongside identity (was silently discarded after registration — issue #1 never needed it, issue #2 does to sign requests); account ID display added to the Safety Number screen (needed so a user can share it to be messaged) |
+| Unplanned     | `web/src/storage/keyStore.ts` reshaped to persist `accountId` alongside identity; account ID display added to the Safety Number screen (both needed for issue #2, neither needed by issue #1) |
+
+### Fix pass notes
+
+Applied all 5 findings from the previous review:
+- `conversation.ts`'s `poll()` silently dropped (and, since fetch is destructive, permanently lost) messages from any sender but the open conversation partner — now logs a warning and carries a `ponytail:` comment naming the limitation and the upgrade path (server-side per-sender fetch, or a contacts list keeping every poll loop alive).
+- Base64 encode/decode was duplicated across **four** call sites, not three as first counted (`register.ts`, `messages.ts`, `prekeyBundle.ts`, and `signedRequest.ts`, found while fixing) — consolidated into `web/src/api/codec.ts`.
+- `Conversation.tsx` now accepts and renders an `error` prop; `App.tsx` wires it through and clears it at the start of `handleSend`, matching the existing pattern on `CreateAccount`/`NewConversation`.
+- `server/src/auth.rs`: a database error while looking up an account's identity key now returns 500, not 401 — 401 is reserved for a genuinely unknown account.
+- `wasm-crypto/src/session.rs`: the `Timestamp::from_epoch_millis(0)` placeholder now carries a comment explaining it's deliberate and naming when it would need a real value.
+
+Re-verified after fixes: server tests (9/9), wasm-crypto smoke tests (10/10 identity, 13/13 session), web e2e tests (8/8 identity, 6/6 messaging) — all still pass, no regressions.

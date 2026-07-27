@@ -1,5 +1,6 @@
 import type { LocalAccount } from "../storage/keyStore";
 import { signWithIdentity } from "../crypto/identity";
+import { toBase64 } from "./codec";
 
 // ponytail: hardcoded dev API base, matches api/register.ts; add env-based config when there's a real deploy target.
 const API_BASE = "http://localhost:3000";
@@ -9,12 +10,6 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return Array.from(new Uint8Array(hash))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
-}
-
-function toBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
 }
 
 /**

@@ -91,6 +91,7 @@ function App() {
   async function handleSend(text: string) {
     if (state.status !== "conversation") return;
     setSending(true);
+    setError(undefined);
     try {
       const messages = await sendText(state.contactId, text, state.account, state.store);
       setState((s) => (s.status === "conversation" ? { ...s, messages } : s));
@@ -116,7 +117,7 @@ function App() {
     );
   }
 
-  return <Conversation messages={state.messages} onSend={handleSend} sending={sending} />;
+  return <Conversation messages={state.messages} onSend={handleSend} sending={sending} error={error} />;
 }
 
 export default App;

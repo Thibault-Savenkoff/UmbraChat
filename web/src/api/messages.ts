@@ -1,15 +1,6 @@
 import type { LocalAccount } from "../storage/keyStore";
 import { signedFetch } from "./signedRequest";
-
-function toBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
-function fromBase64(value: string): Uint8Array {
-  return Uint8Array.from(atob(value), (c) => c.charCodeAt(0));
-}
+import { toBase64, fromBase64 } from "./codec";
 
 export async function sendMessage(recipientAccountId: string, envelope: Uint8Array, account: LocalAccount): Promise<void> {
   const response = await signedFetch("/v1/messages", "POST", account, {

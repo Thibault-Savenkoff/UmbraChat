@@ -5,9 +5,10 @@ interface ConversationProps {
   messages: ChatMessage[];
   onSend: (text: string) => void;
   sending: boolean;
+  error?: string;
 }
 
-export function Conversation({ messages, onSend, sending }: ConversationProps) {
+export function Conversation({ messages, onSend, sending, error }: ConversationProps) {
   const [text, setText] = useState("");
 
   function handleSend() {
@@ -39,6 +40,7 @@ export function Conversation({ messages, onSend, sending }: ConversationProps) {
       <button onClick={handleSend} disabled={sending || !text.trim()}>
         Send
       </button>
+      {error && <p role="alert">{error}</p>}
     </main>
   );
 }

@@ -1,9 +1,10 @@
 import type { LocalAccount } from "../storage/keyStore";
 import type { ContactBundle } from "../crypto/session";
 import { signedFetch } from "./signedRequest";
+import { fromBase64 as fromBase64Bytes } from "./codec";
 
 function fromBase64(value: string): number[] {
-  return Array.from(atob(value), (c) => c.charCodeAt(0));
+  return Array.from(fromBase64Bytes(value));
 }
 
 interface RawSignedPrekey {

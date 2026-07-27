@@ -55,7 +55,15 @@ export async function poll(contactId: string, account: LocalAccount, store: Sign
   let messages = await loadMessages(contactId);
 
   for (const message of received) {
-    if (message.senderAccountId !== contactId) continue; // single-conversation MVP
+    if (message.senderAccountId !== contactId) {
+      // ponytail: GET /v1/messages is fetch-and-delete server-side, so a message
+      // from anyone but the open conversation partner is gone the moment we see
+      // it here - there's no per-contact fetch, and no multi-conversation UI yet
+      // to route it to. Upgrade: server-side per-sender fetch, or a contacts
+      // list that keeps every contact's poll loop alive, not just the open one.
+      console.warn(`dropped a message from ${message.senderAccountId}: no open conversation for that sender`);
+      continue;
+    }
 
     const plaintext = store.decrypt(contactId, message.envelope);
     const envelope = JSON.parse(new TextDecoder().decode(plaintext)) as Envelope;

@@ -121,6 +121,9 @@ impl SignalStore {
 
         let mut inner = InMemSignalProtocolStore::new(identity_key_pair, local.registration_id).map_err(js_err)?;
 
+        // ponytail: record timestamp is a placeholder (0), not the real registration
+        // time - this bundle doesn't carry one, and nothing here reads it yet. Track
+        // the real value once prekey rotation/expiry policy needs to compare ages.
         let signed_key_pair =
             KeyPair::from_public_and_private(&local.signed_prekey.public_key, &local.signed_prekey.private_key).map_err(js_err)?;
         let signed_id = SignedPreKeyId::from(local.signed_prekey.key_id);

@@ -1,13 +1,8 @@
 import type { IdentityBundle } from "../crypto/identity";
+import { toBase64 } from "./codec";
 
 // ponytail: hardcoded dev API base, add env-based config when there's a real deploy target.
 const API_BASE = "http://localhost:3000";
-
-function toBase64(bytes: number[]): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
 
 export async function registerAccount(identity: IdentityBundle): Promise<string> {
   const body = {

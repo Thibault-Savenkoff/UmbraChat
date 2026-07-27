@@ -8,7 +8,7 @@ use sqlx::PgPool;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-use crate::error::{unauthorized, ApiError};
+use crate::error::{server_error, unauthorized, ApiError};
 
 const MAX_CLOCK_SKEW_SECS: i64 = 300;
 
@@ -35,7 +35,7 @@ async fn verify(
     let public_key_bytes = sqlx::query_scalar!("SELECT public_key FROM identity_keys WHERE account_id = $1", account_id)
         .fetch_optional(pool)
         .await
-        .map_err(|_| unauthorized("unknown account"))?
+        .map_err(|_| server_error())?
         .ok_or_else(|| unauthorized("unknown account"))?;
     let identity_key = IdentityKey::decode(&public_key_bytes).map_err(|_| unauthorized("unknown account"))?;
 
