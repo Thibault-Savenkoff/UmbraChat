@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 ---
 
 # Instruction: wasm-crypto stateful sessions, encrypt/decrypt

@@ -3,6 +3,14 @@ use rand::Rng;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
+mod session;
+pub use session::SignalStore;
+
+#[wasm_bindgen(start)]
+pub fn init_panic_hook() {
+    console_error_panic_hook::set_once();
+}
+
 #[derive(Serialize)]
 pub struct PrekeyOutput {
     key_id: u32,
