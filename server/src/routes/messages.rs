@@ -48,13 +48,20 @@ pub async fn fetch_messages(
     State(pool): State<PgPool>,
     AuthenticatedAccount(account_id): AuthenticatedAccount,
 ) -> Result<Json<Vec<ReceivedMessage>>, ApiError> {
-    let rows = sqlx::query!(
+    let mut rows = sqlx::query!(
         "DELETE FROM messages WHERE recipient_account_id = $1 RETURNING sender_account_id, ciphertext, created_at",
         account_id
     )
     .fetch_all(&pool)
     .await
     .map_err(|_| server_error())?;
+
+    // Postgres's DELETE has no ORDER BY (confirmed against a real instance: it's a
+    // syntax error), and RETURNING's row order is otherwise unspecified - sort here
+    // by send time instead. This is server receipt time, not the client's original
+    // send time; fine at this scale, revisit if clock skew or out-of-order network
+    // delivery ever becomes a real problem.
+    rows.sort_by_key(|r| r.created_at);
 
     Ok(Json(
         rows.into_iter()

@@ -158,3 +158,49 @@ async fn sending_then_fetching_returns_the_message_exactly_once() {
     cleanup_account(&pool, alice.account_id).await;
     cleanup_account(&pool, bob.account_id).await;
 }
+
+#[tokio::test]
+async fn fetching_multiple_queued_messages_returns_them_in_send_order() {
+    let app = app().await;
+    let alice = register_account(&app).await;
+    let bob = register_account(&app).await;
+
+    for label in ["first", "second", "third"] {
+        let send_body = json!({
+            "recipient_account_id": bob.account_id,
+            "ciphertext": STANDARD.encode(label.as_bytes()),
+        });
+        let (timestamp, signature) = sign(&alice.identity, "POST", "/v1/messages", send_body.to_string().as_bytes());
+        let headers = [
+            ("x-account-id", alice.account_id.to_string()),
+            ("x-timestamp", timestamp),
+            ("x-signature", signature),
+        ];
+        let refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let (status, _body) = request(&app, "POST", "/v1/messages", &refs, send_body).await;
+        assert_eq!(status, axum::http::StatusCode::CREATED);
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+
+    let (fetch_timestamp, fetch_signature) = sign(&bob.identity, "GET", "/v1/messages", b"");
+    let fetch_headers = [
+        ("x-account-id", bob.account_id.to_string()),
+        ("x-timestamp", fetch_timestamp),
+        ("x-signature", fetch_signature),
+    ];
+    let fetch_refs: Vec<(&str, &str)> = fetch_headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let (fetch_status, fetch_body) = request(&app, "GET", "/v1/messages", &fetch_refs, json!(null)).await;
+    assert_eq!(fetch_status, axum::http::StatusCode::OK);
+
+    let messages = fetch_body.as_array().unwrap();
+    assert_eq!(messages.len(), 3);
+    let received_order: Vec<String> = messages
+        .iter()
+        .map(|m| String::from_utf8(STANDARD.decode(m["ciphertext"].as_str().unwrap()).unwrap()).unwrap())
+        .collect();
+    assert_eq!(received_order, vec!["first", "second", "third"]);
+
+    let pool = db::connect().await;
+    cleanup_account(&pool, alice.account_id).await;
+    cleanup_account(&pool, bob.account_id).await;
+}

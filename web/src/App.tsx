@@ -51,11 +51,16 @@ function App() {
     setState({ status: "conversation", account, contactId, store, messages });
     localStorage.setItem(ACTIVE_CONTACT_KEY, contactId);
 
-    window.clearInterval(pollTimer.current);
-    pollTimer.current = window.setInterval(async () => {
+    const runPoll = async () => {
       const updated = await poll(contactId, account, store);
       setState((s) => (s.status === "conversation" ? { ...s, messages: updated } : s));
-    }, POLL_INTERVAL_MS);
+    };
+
+    window.clearInterval(pollTimer.current);
+    // setInterval only fires after a full interval elapses - poll once immediately
+    // too, so messages queued while offline show up on reconnect without delay.
+    await runPoll();
+    pollTimer.current = window.setInterval(runPoll, POLL_INTERVAL_MS);
   }
 
   async function handleCreate() {
