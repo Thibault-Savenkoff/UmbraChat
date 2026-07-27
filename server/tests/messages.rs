@@ -204,3 +204,41 @@ async fn fetching_multiple_queued_messages_returns_them_in_send_order() {
     cleanup_account(&pool, alice.account_id).await;
     cleanup_account(&pool, bob.account_id).await;
 }
+
+#[tokio::test]
+async fn a_large_body_within_the_limit_succeeds_and_over_the_limit_is_rejected() {
+    let app = app().await;
+    let alice = register_account(&app).await;
+    let bob = register_account(&app).await;
+
+    // 7MB raw -> ~9.3MB base64: within the 12MB limit once wrapped in the request JSON.
+    let large_ciphertext = STANDARD.encode(vec![7u8; 7 * 1024 * 1024]);
+    let send_body = json!({ "recipient_account_id": bob.account_id, "ciphertext": large_ciphertext });
+    let (timestamp, signature) = sign(&alice.identity, "POST", "/v1/messages", send_body.to_string().as_bytes());
+    let headers = [
+        ("x-account-id", alice.account_id.to_string()),
+        ("x-timestamp", timestamp),
+        ("x-signature", signature),
+    ];
+    let refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let (status, _body) = request(&app, "POST", "/v1/messages", &refs, send_body).await;
+    assert_eq!(status, axum::http::StatusCode::CREATED, "a body within the 12MB limit must be accepted");
+
+    // 10MB raw -> ~13.3MB base64: over the 12MB limit.
+    let oversized_ciphertext = STANDARD.encode(vec![7u8; 10 * 1024 * 1024]);
+    let oversized_body = json!({ "recipient_account_id": bob.account_id, "ciphertext": oversized_ciphertext });
+    let (oversized_timestamp, oversized_signature) =
+        sign(&alice.identity, "POST", "/v1/messages", oversized_body.to_string().as_bytes());
+    let oversized_headers = [
+        ("x-account-id", alice.account_id.to_string()),
+        ("x-timestamp", oversized_timestamp),
+        ("x-signature", oversized_signature),
+    ];
+    let oversized_refs: Vec<(&str, &str)> = oversized_headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let (oversized_status, _oversized_response) = request(&app, "POST", "/v1/messages", &oversized_refs, oversized_body).await;
+    assert!(oversized_status.is_client_error(), "a body over the 12MB limit must be rejected, got {oversized_status}");
+
+    let pool = db::connect().await;
+    cleanup_account(&pool, alice.account_id).await;
+    cleanup_account(&pool, bob.account_id).await;
+}

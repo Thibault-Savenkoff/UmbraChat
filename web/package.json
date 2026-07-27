@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "e2e": "node e2e-smoketest.mjs",
     "e2e:messaging": "node e2e-messaging.mjs",
-    "e2e:offline-sync": "node e2e-offline-sync.mjs"
+    "e2e:offline-sync": "node e2e-offline-sync.mjs",
+    "e2e:file-sharing": "node e2e-file-sharing.mjs"
   },
   "dependencies": {
     "react": "^19.2.7",

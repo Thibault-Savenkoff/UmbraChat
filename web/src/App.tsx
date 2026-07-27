@@ -4,7 +4,7 @@ import { generateIdentity, computeSafetyNumber } from "./crypto/identity";
 import { loadAccount, saveAccount, type LocalAccount } from "./storage/keyStore";
 import { loadMessages, type ChatMessage } from "./storage/messageStore";
 import { registerAccount } from "./api/register";
-import { startConversation, sendText, poll } from "./chat/conversation";
+import { startConversation, sendText, sendFile, poll, type FileSendStage } from "./chat/conversation";
 import { CreateAccount } from "./screens/CreateAccount";
 import { SafetyNumber } from "./screens/SafetyNumber";
 import { NewConversation } from "./screens/NewConversation";
@@ -24,6 +24,7 @@ function App() {
   const [creating, setCreating] = useState(false);
   const [starting, setStarting] = useState(false);
   const [sending, setSending] = useState(false);
+  const [fileStage, setFileStage] = useState<FileSendStage>();
   const [error, setError] = useState<string>();
   const pollTimer = useRef<number>(undefined);
 
@@ -107,6 +108,21 @@ function App() {
     }
   }
 
+  async function handleSendFile(file: File) {
+    if (state.status !== "conversation") return;
+    setSending(true);
+    setError(undefined);
+    try {
+      const messages = await sendFile(state.contactId, file, state.account, state.store, setFileStage);
+      setState((s) => (s.status === "conversation" ? { ...s, messages } : s));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed to send file");
+    } finally {
+      setSending(false);
+      setFileStage(undefined);
+    }
+  }
+
   if (state.status === "loading") return null;
 
   if (state.status === "anonymous") {
@@ -122,7 +138,16 @@ function App() {
     );
   }
 
-  return <Conversation messages={state.messages} onSend={handleSend} sending={sending} error={error} />;
+  return (
+    <Conversation
+      messages={state.messages}
+      onSend={handleSend}
+      onSendFile={handleSendFile}
+      sending={sending}
+      fileStage={fileStage}
+      error={error}
+    />
+  );
 }
 
 export default App;
