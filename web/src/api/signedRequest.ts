@@ -1,0 +1,41 @@
+import type { LocalAccount } from "../storage/keyStore";
+import { signWithIdentity } from "../crypto/identity";
+
+// ponytail: hardcoded dev API base, matches api/register.ts; add env-based config when there's a real deploy target.
+const API_BASE = "http://localhost:3000";
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", Uint8Array.from(bytes));
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+/**
+ * Signs method+path+timestamp+body-hash with the local identity private key,
+ * the same shape the server's auth extractor verifies (see server/src/auth.rs).
+ */
+export async function signedFetch(path: string, method: "GET" | "POST", account: LocalAccount, body?: unknown): Promise<Response> {
+  const bodyText = body ? JSON.stringify(body) : "";
+  const bodyHash = await sha256Hex(new TextEncoder().encode(bodyText));
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const message = new TextEncoder().encode(`${method}\n${path}\n${timestamp}\n${bodyHash}`);
+  const signature = await signWithIdentity(account.identity.identity_private_key, message);
+
+  return fetch(`${API_BASE}${path}`, {
+    method,
+    headers: {
+      "content-type": "application/json",
+      "x-account-id": account.accountId,
+      "x-timestamp": timestamp,
+      "x-signature": toBase64(signature),
+    },
+    body: body ? bodyText : undefined,
+  });
+}
