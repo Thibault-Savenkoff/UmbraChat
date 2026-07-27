@@ -1,6 +1,6 @@
 ---
 objective: "A per-conversation disappearing-message timer, synced between both participants, actually deletes expired messages from each device rather than just hiding them."
-status: pending
+status: implemented
 ---
 
 # Plan: Disappearing messages
