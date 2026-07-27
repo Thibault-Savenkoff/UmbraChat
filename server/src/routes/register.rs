@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::error::{bad_request, server_error, ApiError};
+
 #[derive(Deserialize)]
 pub struct SignedPrekeyDto {
     pub key_id: i32,
@@ -35,25 +37,7 @@ pub struct RegisterResponse {
     pub account_id: Uuid,
 }
 
-#[derive(Serialize)]
-pub struct ErrorResponse {
-    pub error: String,
-}
-
 const MAX_ONE_TIME_PREKEYS: usize = 100;
-
-type ApiError = (StatusCode, Json<ErrorResponse>);
-
-fn bad_request(msg: &str) -> ApiError {
-    (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: msg.to_string() }))
-}
-
-fn server_error() -> ApiError {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ErrorResponse { error: "database error".to_string() }),
-    )
-}
 
 pub async fn register(
     State(pool): State<PgPool>,
