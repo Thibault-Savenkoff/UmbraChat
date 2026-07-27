@@ -5,7 +5,7 @@ Full stack rationale and the audit that produced it: [`aidd_docs/INSTALL.md`](..
 ## Stack
 
 - Back-end: Rust (Axum + Tokio), using the official `libsignal-client` crate directly — no community port, no hand-rolled crypto
-- Web: React PWA (Vite), using Signal's official WASM/Node `libsignal-client` build
+- Web: React PWA (Vite), using `wasm-crypto` — our own `wasm-bindgen` wrapper around the same official `libsignal-protocol` crate the server uses (Signal ships no browser/WASM build of its own; their "web" client is Electron, a Node runtime)
 - Mobile: native Swift (iOS) and native Kotlin (Android), each using libsignal's official Swift/Java bindings — not React Native, to avoid the unofficial-binding risk that ruled out the other candidates
 - Database: PostgreSQL via `sqlx` (async, compile-time-checked queries, no ORM)
 
@@ -43,3 +43,4 @@ graph TB
 ## Gotchas
 
 - iOS has no App Store or paid-developer-account distribution path (the project has a $0 hard budget). It ships via AltStore/SideStore sideloading with a free Apple ID, which means the app needs re-signing roughly every 7 days — a real UX cost, accepted deliberately.
+- `@signalapp/libsignal-client` (npm) is a native Node addon, not a browser build — it cannot run in the web PWA. Discovered by inspecting its `package.json` (`node-gyp-build` dependency, no `browser` field) and confirming no `wasm32` target exists anywhere in the `signalapp/libsignal` source. The `wasm-crypto` crate exists specifically to fill this gap.

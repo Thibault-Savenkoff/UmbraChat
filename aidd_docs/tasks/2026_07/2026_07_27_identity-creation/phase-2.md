@@ -1,8 +1,8 @@
 ---
-status: pending
+status: done
 ---
 
-# Instruction: Web client identity generation + registration UI
+# Instruction: WASM crypto wrapper around official libsignal-protocol
 
 ## Architecture projection
 
@@ -10,93 +10,51 @@ status: pending
 
 ```txt
 .
-├── web/
-│   ├── package.json                    ✅
-│   ├── src/
-│   │   ├── main.tsx                    ✅
-│   │   ├── crypto/
-│   │   │   └── identity.ts             ✅
-│   │   ├── storage/
-│   │   │   └── keyStore.ts             ✅
-│   │   ├── api/
-│   │   │   └── register.ts             ✅
-│   │   └── screens/
-│   │       ├── CreateAccount.tsx       ✅
-│   │       └── SafetyNumber.tsx        ✅
+├── wasm-crypto/
+│   ├── Cargo.toml    ✅
+│   └── src/
+│       └── lib.rs    ✅
 ```
 
 ## User Journey
 
 ```mermaid
 flowchart TD
-  A[User opens app, no local identity found] --> B[CreateAccount screen: Create Account button]
-  B --> C[identity.ts generates identity key pair + prekey bundle via libsignal WASM]
-  C --> D[keyStore.ts stores private key material in IndexedDB, never leaves device]
-  D --> E[register.ts POSTs public bundle to server /v1/register]
-  E --> F[SafetyNumber screen shows the account's fingerprint]
+  A[web app calls wasm-crypto generate_identity_bundle] --> B[Rust code, compiled to WASM, calls the official libsignal-protocol crate]
+  B --> C[Identity key pair + signed prekey + one-time prekeys generated in-browser]
+  C --> D[Result returned to JS as a plain object, private keys included]
+  D --> E[web app keeps private keys local, sends only the public parts to the server]
 ```
-
-## Wireframe
-
-```txt
-┌─────────────────────────────────────┐
-│ (1) UmbraChat                        │
-│                                       │
-│         (2) [ Create Account ]       │
-│                                       │
-│   (3) No password. Your keys never   │
-│       leave this device.             │
-└─────────────────────────────────────┘
-
-┌─────────────────────────────────────┐
-│ (4) Your Safety Number                │
-│                                       │
-│  (5) 12345 67890 12345 67890         │
-│      12345 67890 12345 67890         │
-│                                       │
-│  (6) Share this number with contacts │
-│      to verify your identity.        │
-│         [ Continue ]                 │
-└─────────────────────────────────────┘
-```
-
-1. Brand header, no account/menu since there's no login yet.
-2. Single call-to-action, no form fields — the identity is generated, not entered.
-3. Sets expectation: no password, keys stay local.
-4. Header for the post-creation safety-number screen.
-5. The generated fingerprint, formatted in grouped digits (matches how Signal displays safety numbers).
-6. Explains the number's purpose and lets the user proceed into the app.
 
 ## Tasks to do
 
-### 1) Add the web app and libsignal WASM bindings
+### 1) Scaffold the WASM crate
 
-> Get a React + Vite app running with the official libsignal WASM package available.
+> A `cdylib` crate depending on the same official, tag-pinned `libsignal-protocol` the server uses.
 
-1. `npm create vite@latest web -- --template react-ts`
-2. `npm install @signalapp/libsignal-client` (Signal's official WASM/Node build) in `web/`
-3. Confirm it loads in the browser (WASM init) without a bundler error
+1. `cargo new wasm-crypto --lib`, set `crate-type = ["cdylib"]` in `Cargo.toml`
+2. Add `wasm-bindgen` and `libsignal-protocol` as a git dependency pinned to tag `v0.99.1` from `https://github.com/signalapp/libsignal` (same tag as `server/`, so both sides speak the same protocol version)
+3. Install the `wasm32-unknown-unknown` target and `wasm-pack` if not already present
 
-### 2) Generate and store the identity locally
+### 2) Expose identity + prekey bundle generation
 
-> On first launch, generate the identity key pair and prekey bundle, keep the private material on-device.
+> One function, callable from JS, that does everything phase-3's client needs.
 
-1. `crypto/identity.ts`: generate an identity key pair, a registration id, one signed prekey, and a batch of one-time prekeys via the libsignal WASM API
-2. `storage/keyStore.ts`: persist the private identity key and prekey private material in IndexedDB; never send it anywhere
-3. On subsequent launches, detect an existing local identity and skip generation
+1. `lib.rs`: a `#[wasm_bindgen]` function that generates an identity key pair, a registration id, one signed prekey, and a batch of one-time prekeys via `libsignal-protocol`
+2. Handle the browser-randomness gotcha: `getrandom`/`rand`'s default OS entropy source does not exist in a browser sandbox, so the crate needs the WASM-targeted randomness feature enabled — resolve the exact feature flag against the real compiler error, don't guess it upfront
+3. Return the result to JS as a plain serializable object (public and private key bytes, key ids), leaving what to persist where as phase-3's job
 
-### 3) Build the Create Account and Safety Number screens
+### 3) Build and smoke-test the WASM package
 
-> Wire the two screens from the wireframe to the generation + registration flow.
+> Prove it actually runs in a JS environment, not just that `cargo build` succeeds for the native target.
 
-1. `screens/CreateAccount.tsx`: single button, calls `identity.ts` then `api/register.ts`
-2. `api/register.ts`: POST the public bundle (identity public key, registration id, signed prekey + signature, one-time prekeys) to `/v1/register`, store the returned account id locally
-3. `screens/SafetyNumber.tsx`: derive and display the safety number from the local identity public key, formatted in grouped digits
+1. `wasm-pack build --target web`
+2. Load the built package from a plain Node or browser-like JS snippet and call the generation function, confirming it returns key bytes without throwing
 
 ## Test acceptance criteria
 
 | Task | Acceptance criteria              |
 | ---- | -------------------------------- |
-| 1 | `npm run dev` serves the app and the libsignal WASM module initializes with no console error |
-| 2 | Reloading the app after account creation does not regenerate a new identity (the existing one is reused) |
-| 3 | Clicking "Create Account" leads to a Safety Number screen showing a non-empty fingerprint, and the server's `identity_keys` table has exactly one new row containing only public key bytes |
+| 1 | `cargo build --target wasm32-unknown-unknown` succeeds inside `wasm-crypto/` |
+| 2 | `wasm-pack build --target web` succeeds and emits a `pkg/` directory |
+| 3 | A JS snippet importing the built package and calling the generation function returns a non-empty identity public key, signed prekey (with signature), and at least one one-time prekey, with no thrown error |
