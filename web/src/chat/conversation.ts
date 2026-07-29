@@ -25,6 +25,11 @@ interface ReceiptEnvelope {
   refId: string;
 }
 
+interface TimerEnvelope {
+  type: "timer";
+  seconds: number;
+}
+
 export interface CallOfferEnvelope {
   type: "call-offer";
   callId: string;
@@ -56,7 +61,7 @@ function isCallEnvelope(envelope: Envelope): envelope is CallEnvelope {
   return envelope.type === "call-offer" || envelope.type === "call-answer" || envelope.type === "call-ice" || envelope.type === "call-end";
 }
 
-type Envelope = TextEnvelope | FileEnvelope | ReceiptEnvelope | CallEnvelope;
+type Envelope = TextEnvelope | FileEnvelope | ReceiptEnvelope | TimerEnvelope | CallEnvelope;
 
 /** Sends a call-signaling envelope through the same encrypted pipe as everything else - never shown as a chat message. */
 export async function sendCallSignal(contactId: string, envelope: CallEnvelope, account: LocalAccount, store: SignalStore): Promise<void> {
@@ -69,6 +74,27 @@ export const MAX_FILE_BYTES = 8 * 1024 * 1024;
 
 export function isFileTooLarge(file: File): boolean {
   return file.size > MAX_FILE_BYTES;
+}
+
+function timerKey(contactId: string): string {
+  return `umbrachat:timer:${contactId}`;
+}
+
+/** 0 means off - matches the default when nothing has been set yet. */
+export function getTimerSeconds(contactId: string): number {
+  return Number(localStorage.getItem(timerKey(contactId)) ?? 0);
+}
+
+function setTimerSecondsLocal(contactId: string, seconds: number): void {
+  localStorage.setItem(timerKey(contactId), String(seconds));
+}
+
+export async function setDisappearingTimer(contactId: string, seconds: number, account: LocalAccount, store: SignalStore): Promise<void> {
+  const envelope: TimerEnvelope = { type: "timer", seconds };
+  const ciphertext = store.encrypt(contactId, new TextEncoder().encode(JSON.stringify(envelope)));
+  await sendMessage(contactId, ciphertext, account);
+  await persistSession(store, contactId);
+  setTimerSecondsLocal(contactId, seconds);
 }
 
 /** Opens the local store, restoring any persisted session, and establishes one with the contact if needed. */
@@ -91,7 +117,15 @@ export async function sendText(contactId: string, text: string, account: LocalAc
   await persistSession(store, contactId);
 
   const messages = await loadMessages(contactId);
-  messages.push({ id: envelope.id, direction: "sent", text, status: "sent", createdAt: new Date().toISOString() });
+  const timerSeconds = getTimerSeconds(contactId);
+  messages.push({
+    id: envelope.id,
+    direction: "sent",
+    text,
+    status: "sent",
+    createdAt: new Date().toISOString(),
+    ...(timerSeconds > 0 ? { timerSeconds } : {}),
+  });
   await saveMessages(contactId, messages);
   return messages;
 }
@@ -171,7 +205,17 @@ export async function poll(
     if (isCallEnvelope(envelope)) {
       await onCallSignal?.(envelope);
     } else if (envelope.type === "text") {
-      messages.push({ id: envelope.id, direction: "received", text: envelope.body, status: "delivered", createdAt: message.createdAt });
+      const timerSeconds = getTimerSeconds(contactId);
+      messages.push({
+        id: envelope.id,
+        direction: "received",
+        text: envelope.body,
+        status: "delivered",
+        createdAt: message.createdAt,
+        // Receiving while the conversation is open is already this app's "read"
+        // moment (see the receipt loop below), so the expiry clock starts now.
+        ...(timerSeconds > 0 ? { expiresAt: new Date(Date.now() + timerSeconds * 1000).toISOString() } : {}),
+      });
 
       for (const type of ["delivered", "read"] as const) {
         const receipt: ReceiptEnvelope = { type, refId: envelope.id };
@@ -187,14 +231,24 @@ export async function poll(
         createdAt: message.createdAt,
         file: { filename: envelope.filename, mimeType: envelope.mimeType, size: envelope.size, bytes: Uint8Array.from(envelope.data) },
       });
+    } else if (envelope.type === "timer") {
+      setTimerSecondsLocal(contactId, envelope.seconds);
     } else {
       const target = messages.find((m) => m.id === envelope.refId && m.direction === "sent");
-      if (target) target.status = envelope.type;
+      if (target) {
+        target.status = envelope.type;
+        if (envelope.type === "read" && target.timerSeconds && !target.expiresAt) {
+          target.expiresAt = new Date(Date.now() + target.timerSeconds * 1000).toISOString();
+        }
+      }
     }
 
     await persistSession(store, contactId);
   }
 
-  if (received.length > 0) await saveMessages(contactId, messages);
-  return messages;
+  const now = Date.now();
+  const alive = messages.filter((m) => !m.expiresAt || new Date(m.expiresAt).getTime() > now);
+
+  if (received.length > 0 || alive.length !== messages.length) await saveMessages(contactId, alive);
+  return alive;
 }

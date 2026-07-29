@@ -4,7 +4,7 @@ import { generateIdentity, computeSafetyNumber } from "./crypto/identity";
 import { loadAccount, saveAccount, type LocalAccount } from "./storage/keyStore";
 import { loadMessages, type ChatMessage } from "./storage/messageStore";
 import { registerAccount } from "./api/register";
-import { startConversation, sendText, sendFile, poll, type FileSendStage } from "./chat/conversation";
+import { startConversation, sendText, sendFile, poll, getTimerSeconds, setDisappearingTimer, type FileSendStage } from "./chat/conversation";
 import { startCall, acceptCall, declineCall, hangUp, handleCallSignal, subscribeToCallState, getCallState, type CallState } from "./chat/call";
 import { CreateAccount } from "./screens/CreateAccount";
 import { SafetyNumber } from "./screens/SafetyNumber";
@@ -33,6 +33,7 @@ function App() {
   const [sending, setSending] = useState(false);
   const [fileStage, setFileStage] = useState<FileSendStage>();
   const [callState, setCallState] = useState<CallState>(getCallState());
+  const [timerSeconds, setTimerSecondsState] = useState(0);
   const [error, setError] = useState<string>();
   const pollTimer = useRef<number>(undefined);
   const pollIntervalRef = useRef(POLL_INTERVAL_MS);
@@ -61,11 +62,13 @@ function App() {
     const store = await startConversation(contactId, account);
     const messages = await loadMessages(contactId);
     setState({ status: "conversation", account, contactId, store, messages });
+    setTimerSecondsState(getTimerSeconds(contactId));
     localStorage.setItem(ACTIVE_CONTACT_KEY, contactId);
 
     const runPoll = async () => {
       const updated = await poll(contactId, account, store, handleCallSignal);
       setState((s) => (s.status === "conversation" ? { ...s, messages: updated } : s));
+      setTimerSecondsState(getTimerSeconds(contactId));
 
       // Ringing needs faster signaling round trips than the normal message-poll
       // interval. This is the only place that schedules the interval (including
@@ -144,6 +147,12 @@ function App() {
     }
   }
 
+  async function handleSetTimer(seconds: number) {
+    if (state.status !== "conversation") return;
+    setTimerSecondsState(seconds);
+    await setDisappearingTimer(state.contactId, seconds, state.account, state.store);
+  }
+
   if (state.status === "loading") return null;
 
   if (state.status === "anonymous") {
@@ -176,9 +185,11 @@ function App() {
         onSend={handleSend}
         onSendFile={handleSendFile}
         onStartCall={(kind) => void startCall(contactId, kind, account, store)}
+        onSetTimer={handleSetTimer}
         sending={sending}
         fileStage={fileStage}
         callActive={callState.status !== "idle" && callState.status !== "ended"}
+        timerSeconds={timerSeconds}
         error={error}
       />
     </>
