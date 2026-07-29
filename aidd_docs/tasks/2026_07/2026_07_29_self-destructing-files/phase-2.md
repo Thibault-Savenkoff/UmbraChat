@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Web - destruct-mode picker, open-triggers-delete, status visibility

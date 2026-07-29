@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import type { ChatMessage } from "../storage/messageStore";
-import { isFileTooLarge, type FileSendStage } from "../chat/conversation";
+import { isFileTooLarge, type FileDestruct, type FileSendStage } from "../chat/conversation";
 
 interface ConversationProps {
   messages: ChatMessage[];
   onSend: (text: string) => void;
-  onSendFile: (file: File) => void;
+  onSendFile: (file: File, destruct?: FileDestruct) => void;
+  onOpenFile: (messageId: string) => void;
   onStartCall: (kind: "voice" | "video") => void;
   onSetTimer: (seconds: number) => void;
   sending: boolean;
@@ -23,13 +24,28 @@ const TIMER_OPTIONS: [number, string][] = [
   [24 * 60 * 60, "1d"],
 ];
 
+// "on-open" is its own sentinel value distinct from the numeric timers.
+const DESTRUCT_OPTIONS: [string, string][] = [
+  ["none", "None"],
+  ["on-open", "Delete after opening"],
+  ["30", "Delete after 30s"],
+  ["300", "Delete after 5m"],
+  ["3600", "Delete after 1h"],
+];
+
+function destructFromOption(value: string): FileDestruct | undefined {
+  if (value === "none") return undefined;
+  if (value === "on-open") return { onOpen: true };
+  return { afterSeconds: Number(value) };
+}
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
-function FileMessage({ message }: { message: ChatMessage }) {
+function FileMessage({ message, onOpenFile }: { message: ChatMessage; onOpenFile: (messageId: string) => void }) {
   const file = message.file!;
   // Keyed on message.id, not file.bytes: messages reload fresh from storage on
   // every poll, so the Uint8Array reference changes even when the content
@@ -42,14 +58,16 @@ function FileMessage({ message }: { message: ChatMessage }) {
   // StrictMode-safe. The URL's lifetime is already bounded to the page
   // session (freed on reload/close); fine at this scale.
   const url = useMemo(() => URL.createObjectURL(new Blob([Uint8Array.from(file.bytes)], { type: file.mimeType })), [message.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const selfDestructs = message.destructOnOpen || message.timerSeconds || message.expiresAt;
 
   return (
     <span data-testid="file-message">
-      📎 {file.filename} ({formatSize(file.size)})
+      📎 {file.filename} ({formatSize(file.size)}){selfDestructs && <span data-testid="destruct-marker"> 🔥</span>}
       {message.direction === "sent" ? (
         <span data-testid="message-status"> ({message.status})</span>
       ) : (
-        <a href={url} download={file.filename} data-testid="file-download">
+        // Doesn't preventDefault - the native download still proceeds alongside the side effect.
+        <a href={url} download={file.filename} data-testid="file-download" onClick={() => onOpenFile(message.id)}>
           Download
         </a>
       )}
@@ -61,6 +79,7 @@ export function Conversation({
   messages,
   onSend,
   onSendFile,
+  onOpenFile,
   onStartCall,
   onSetTimer,
   sending,
@@ -71,6 +90,7 @@ export function Conversation({
 }: ConversationProps) {
   const [text, setText] = useState("");
   const [fileError, setFileError] = useState<string>();
+  const [destructMode, setDestructMode] = useState("none");
 
   function handleSend() {
     const trimmed = text.trim();
@@ -88,7 +108,7 @@ export function Conversation({
       setFileError(`${file.name} is too large (max 8MB)`);
       return;
     }
-    onSendFile(file);
+    onSendFile(file, destructFromOption(destructMode));
   }
 
   return (
@@ -119,7 +139,7 @@ export function Conversation({
       <ul data-testid="message-list">
         {messages.map((m) => (
           <li key={m.id} data-testid={`message-${m.direction}`}>
-            {m.file ? <FileMessage message={m} /> : <span>{m.text}</span>}
+            {m.file ? <FileMessage message={m} onOpenFile={onOpenFile} /> : <span>{m.text}</span>}
             {!m.file && (m.timerSeconds || m.expiresAt) && <span data-testid="disappearing-marker"> ⏱</span>}
             {m.direction === "sent" && !m.file && <span data-testid="message-status"> ({m.status})</span>}
           </li>
@@ -134,6 +154,13 @@ export function Conversation({
         disabled={sending}
       />
       <input type="file" aria-label="Attach a file" onChange={handleFilePick} disabled={sending} />
+      <select data-testid="file-destruct-mode" aria-label="Self-destruct mode for the next file" value={destructMode} onChange={(e) => setDestructMode(e.target.value)} disabled={sending}>
+        {DESTRUCT_OPTIONS.map(([value, label]) => (
+          <option key={value} value={value}>
+            {label}
+          </option>
+        ))}
+      </select>
       <button onClick={handleSend} disabled={sending || !text.trim()}>
         Send
       </button>
