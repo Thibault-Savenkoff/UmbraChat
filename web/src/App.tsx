@@ -4,10 +4,12 @@ import { generateIdentity, computeSafetyNumber } from "./crypto/identity";
 import { loadAccount, saveAccount, type LocalAccount } from "./storage/keyStore";
 import { loadMessages, type ChatMessage } from "./storage/messageStore";
 import { registerAccount } from "./api/register";
+import { completeLink } from "./api/devices";
 import { startConversation, sendText, sendFile, poll, getTimerSeconds, setDisappearingTimer, type FileSendStage } from "./chat/conversation";
 import { startCall, acceptCall, declineCall, hangUp, handleCallSignal, subscribeToCallState, getCallState, type CallState } from "./chat/call";
 import { CreateAccount } from "./screens/CreateAccount";
 import { SafetyNumber } from "./screens/SafetyNumber";
+import { LinkedDevices } from "./screens/LinkedDevices";
 import { NewConversation } from "./screens/NewConversation";
 import { Conversation } from "./screens/Conversation";
 import { CallScreen } from "./screens/CallScreen";
@@ -105,6 +107,23 @@ function App() {
     }
   }
 
+  async function handleLinkDevice(accountId: string, code: string) {
+    setCreating(true);
+    setError(undefined);
+    try {
+      const identity = await generateIdentity();
+      const deviceId = await completeLink(accountId, code, "Linked Device", identity);
+      const account: LocalAccount = { accountId, deviceId, identity };
+      await saveAccount(account);
+      const safetyNumber = await computeSafetyNumber(identity.identity_public_key);
+      setState({ status: "identity-ready", account, safetyNumber });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed to link device");
+    } finally {
+      setCreating(false);
+    }
+  }
+
   async function handleStartConversation(contactId: string) {
     if (state.status !== "identity-ready") return;
     setStarting(true);
@@ -156,13 +175,14 @@ function App() {
   if (state.status === "loading") return null;
 
   if (state.status === "anonymous") {
-    return <CreateAccount onCreate={handleCreate} creating={creating} error={error} />;
+    return <CreateAccount onCreate={handleCreate} onLink={handleLinkDevice} creating={creating} error={error} />;
   }
 
   if (state.status === "identity-ready") {
     return (
       <>
         <SafetyNumber accountId={state.account.accountId} safetyNumber={state.safetyNumber} />
+        <LinkedDevices account={state.account} />
         <NewConversation onStart={handleStartConversation} starting={starting} error={error} />
       </>
     );
