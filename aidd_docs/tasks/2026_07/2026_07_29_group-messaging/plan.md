@@ -1,6 +1,6 @@
 ---
 objective: "A user can create a group, exchange E2E encrypted text messages visible to all current members, and remove a member so they stop receiving new messages - the server never learns group membership or content."
-status: pending
+status: implemented
 ---
 
 # Plan: E2E encrypted group messaging
