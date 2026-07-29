@@ -1,6 +1,6 @@
 ---
 objective: "Two users can complete an E2E-encrypted 1:1 voice or video call over a direct P2P WebRTC connection, with clear declined/unreachable/failed states - no media ever touches the server."
-status: pending
+status: implemented
 ---
 
 # Plan: E2E encrypted voice/video calls (1:1)
