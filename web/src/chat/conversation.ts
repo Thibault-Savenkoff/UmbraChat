@@ -19,10 +19,17 @@ interface FileEnvelope {
   mimeType: string;
   size: number;
   data: number[];
+  destructOnOpen?: boolean;
+  timerSeconds?: number;
 }
 
 interface ReceiptEnvelope {
   type: "delivered" | "read";
+  refId: string;
+}
+
+interface FileOpenedEnvelope {
+  type: "file-opened";
   refId: string;
 }
 
@@ -62,7 +69,7 @@ function isCallEnvelope(envelope: Envelope): envelope is CallEnvelope {
   return envelope.type === "call-offer" || envelope.type === "call-answer" || envelope.type === "call-ice" || envelope.type === "call-end";
 }
 
-type Envelope = TextEnvelope | FileEnvelope | ReceiptEnvelope | TimerEnvelope | CallEnvelope;
+type Envelope = TextEnvelope | FileEnvelope | ReceiptEnvelope | FileOpenedEnvelope | TimerEnvelope | CallEnvelope;
 
 /** The composite session address a contact's specific device is addressed by.
  * `wasm-crypto` treats this as an opaque string name (its own device_id field
@@ -156,6 +163,7 @@ export async function sendText(contactId: string, text: string, account: LocalAc
 }
 
 export type FileSendStage = "encrypting" | "sending" | "sent";
+export type FileDestruct = { onOpen: true } | { afterSeconds: number };
 
 export async function sendFile(
   contactId: string,
@@ -163,6 +171,7 @@ export async function sendFile(
   account: LocalAccount,
   store: SignalStore,
   onStage: (stage: FileSendStage) => void,
+  destruct?: FileDestruct,
 ): Promise<ChatMessage[]> {
   onStage("encrypting");
   const bytes = new Uint8Array(await file.arrayBuffer());
@@ -173,6 +182,8 @@ export async function sendFile(
     mimeType: file.type || "application/octet-stream",
     size: file.size,
     data: Array.from(bytes),
+    ...(destruct && "onOpen" in destruct ? { destructOnOpen: true } : {}),
+    ...(destruct && "afterSeconds" in destruct ? { timerSeconds: destruct.afterSeconds } : {}),
   };
 
   onStage("sending");
@@ -186,10 +197,32 @@ export async function sendFile(
     status: "sent",
     createdAt: new Date().toISOString(),
     file: { filename: envelope.filename, mimeType: envelope.mimeType, size: envelope.size, bytes },
+    ...(destruct && "onOpen" in destruct ? { destructOnOpen: true } : {}),
+    // Pegged to send time, not read time: a timed file must vanish on schedule
+    // even if the recipient never opens it, unlike disappearing text messages.
+    ...(destruct && "afterSeconds" in destruct ? { expiresAt: new Date(Date.now() + destruct.afterSeconds * 1000).toISOString() } : {}),
   });
   await saveMessages(contactId, messages);
   onStage("sent");
   return messages;
+}
+
+/**
+ * Reports back that a received file was opened - always, for the sender's
+ * visibility, regardless of destruct mode - and, if it was on-open, deletes it
+ * from local storage immediately rather than waiting for the next poll's sweep.
+ */
+export async function markFileOpened(contactId: string, messageId: string, account: LocalAccount, store: SignalStore): Promise<ChatMessage[]> {
+  const receipt: FileOpenedEnvelope = { type: "file-opened", refId: messageId };
+  await sendToContact(contactId, new TextEncoder().encode(JSON.stringify(receipt)), account, store);
+
+  const messages = await loadMessages(contactId);
+  const target = messages.find((m) => m.id === messageId);
+  if (!target?.destructOnOpen) return messages;
+
+  const remaining = messages.filter((m) => m.id !== messageId);
+  await saveMessages(contactId, remaining);
+  return remaining;
 }
 
 /**
@@ -253,9 +286,14 @@ export async function poll(
         status: "delivered",
         createdAt: message.createdAt,
         file: { filename: envelope.filename, mimeType: envelope.mimeType, size: envelope.size, bytes: Uint8Array.from(envelope.data) },
+        ...(envelope.destructOnOpen ? { destructOnOpen: true } : {}),
+        ...(envelope.timerSeconds ? { expiresAt: new Date(Date.now() + envelope.timerSeconds * 1000).toISOString() } : {}),
       });
     } else if (envelope.type === "timer") {
       setTimerSecondsLocal(contactId, envelope.seconds);
+    } else if (envelope.type === "file-opened") {
+      const target = messages.find((m) => m.id === envelope.refId && m.direction === "sent");
+      if (target) target.status = "opened";
     } else {
       const target = messages.find((m) => m.id === envelope.refId && m.direction === "sent");
       if (target) {

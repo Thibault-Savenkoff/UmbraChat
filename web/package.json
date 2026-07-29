@@ -14,6 +14,8 @@
     "e2e:file-sharing": "node e2e-file-sharing.mjs",
     "e2e:disappearing-messages": "node e2e-disappearing-messages.mjs",
     "e2e:voice-video-calls": "node e2e-voice-video-calls.mjs",
+    "e2e:screenshot-detection": "node e2e-screenshot-detection.mjs",
+    "e2e:self-destructing-files": "node e2e-self-destructing-files.mjs",
     "e2e:multi-device-sync": "node e2e-multi-device-sync.mjs"
   },
   "dependencies": {
