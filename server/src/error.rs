@@ -16,6 +16,10 @@ pub fn unauthorized(msg: &str) -> ApiError {
     (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: msg.to_string() }))
 }
 
+pub fn forbidden(msg: &str) -> ApiError {
+    (StatusCode::FORBIDDEN, Json(ErrorResponse { error: msg.to_string() }))
+}
+
 pub fn not_found(msg: &str) -> ApiError {
     (StatusCode::NOT_FOUND, Json(ErrorResponse { error: msg.to_string() }))
 }

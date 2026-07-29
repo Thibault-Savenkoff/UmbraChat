@@ -2,7 +2,7 @@ use axum::{extract::State, http::StatusCode, Json};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use libsignal_protocol::{kem, IdentityKey, PublicKey};
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::error::{bad_request, server_error, ApiError};
@@ -40,10 +40,23 @@ pub struct RegisterResponse {
 
 const MAX_ONE_TIME_PREKEYS: usize = 100;
 
-pub async fn register(
-    State(pool): State<PgPool>,
-    Json(req): Json<RegisterRequest>,
-) -> Result<(StatusCode, Json<RegisterResponse>), ApiError> {
+/// A `RegisterRequest`'s fields, decoded from base64 and signature-verified
+/// against its own identity key - shared by `/v1/register` (new account) and
+/// `devices::complete_link` (new device on an existing account), so the
+/// validation rules can't drift between the two.
+pub struct DecodedBundle {
+    pub identity_key_bytes: Vec<u8>,
+    pub registration_id: i32,
+    pub signed_prekey_key_id: i32,
+    pub signed_prekey_bytes: Vec<u8>,
+    pub signature_bytes: Vec<u8>,
+    pub kyber_signed_prekey_key_id: i32,
+    pub kyber_public_key_bytes: Vec<u8>,
+    pub kyber_signature_bytes: Vec<u8>,
+    pub one_time_prekeys: Vec<(i32, Vec<u8>)>,
+}
+
+pub fn validate_bundle(req: &RegisterRequest) -> Result<DecodedBundle, ApiError> {
     let identity_key_bytes = STANDARD
         .decode(&req.identity_public_key)
         .map_err(|_| bad_request("identity_public_key is not valid base64"))?;
@@ -93,6 +106,75 @@ pub async fn register(
         one_time_prekeys.push((prekey.key_id, bytes));
     }
 
+    Ok(DecodedBundle {
+        identity_key_bytes,
+        registration_id: req.registration_id,
+        signed_prekey_key_id: req.signed_prekey.key_id,
+        signed_prekey_bytes,
+        signature_bytes,
+        kyber_signed_prekey_key_id: req.kyber_signed_prekey.key_id,
+        kyber_public_key_bytes,
+        kyber_signature_bytes,
+        one_time_prekeys,
+    })
+}
+
+/// Inserts a validated bundle's identity/prekey rows under `device_id`, which
+/// the caller must have already created.
+pub async fn insert_device_bundle(tx: &mut Transaction<'_, Postgres>, device_id: Uuid, bundle: &DecodedBundle) -> Result<(), ApiError> {
+    sqlx::query!(
+        "INSERT INTO identity_keys (device_id, public_key, registration_id) VALUES ($1, $2, $3)",
+        device_id,
+        bundle.identity_key_bytes,
+        bundle.registration_id,
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|_| server_error())?;
+
+    sqlx::query!(
+        "INSERT INTO signed_prekeys (device_id, key_id, public_key, signature) VALUES ($1, $2, $3, $4)",
+        device_id,
+        bundle.signed_prekey_key_id,
+        bundle.signed_prekey_bytes,
+        bundle.signature_bytes,
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|_| server_error())?;
+
+    sqlx::query!(
+        "INSERT INTO kyber_signed_prekeys (device_id, key_id, public_key, signature) VALUES ($1, $2, $3, $4)",
+        device_id,
+        bundle.kyber_signed_prekey_key_id,
+        bundle.kyber_public_key_bytes,
+        bundle.kyber_signature_bytes,
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|_| server_error())?;
+
+    for (key_id, public_key) in &bundle.one_time_prekeys {
+        sqlx::query!(
+            "INSERT INTO prekeys (device_id, key_id, public_key) VALUES ($1, $2, $3)",
+            device_id,
+            key_id,
+            public_key,
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|_| server_error())?;
+    }
+
+    Ok(())
+}
+
+pub async fn register(
+    State(pool): State<PgPool>,
+    Json(req): Json<RegisterRequest>,
+) -> Result<(StatusCode, Json<RegisterResponse>), ApiError> {
+    let bundle = validate_bundle(&req)?;
+
     let mut tx = pool.begin().await.map_err(|_| server_error())?;
 
     let account_id = sqlx::query_scalar!("INSERT INTO accounts DEFAULT VALUES RETURNING id")
@@ -105,49 +187,7 @@ pub async fn register(
         .await
         .map_err(|_| server_error())?;
 
-    sqlx::query!(
-        "INSERT INTO identity_keys (device_id, public_key, registration_id) VALUES ($1, $2, $3)",
-        device_id,
-        identity_key_bytes,
-        req.registration_id,
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|_| server_error())?;
-
-    sqlx::query!(
-        "INSERT INTO signed_prekeys (device_id, key_id, public_key, signature) VALUES ($1, $2, $3, $4)",
-        device_id,
-        req.signed_prekey.key_id,
-        signed_prekey_bytes,
-        signature_bytes,
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|_| server_error())?;
-
-    sqlx::query!(
-        "INSERT INTO kyber_signed_prekeys (device_id, key_id, public_key, signature) VALUES ($1, $2, $3, $4)",
-        device_id,
-        req.kyber_signed_prekey.key_id,
-        kyber_public_key_bytes,
-        kyber_signature_bytes,
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|_| server_error())?;
-
-    for (key_id, public_key) in &one_time_prekeys {
-        sqlx::query!(
-            "INSERT INTO prekeys (device_id, key_id, public_key) VALUES ($1, $2, $3)",
-            device_id,
-            key_id,
-            public_key,
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| server_error())?;
-    }
+    insert_device_bundle(&mut tx, device_id, &bundle).await?;
 
     tx.commit().await.map_err(|_| server_error())?;
 
