@@ -30,7 +30,45 @@ interface TimerEnvelope {
   seconds: number;
 }
 
-type Envelope = TextEnvelope | FileEnvelope | ReceiptEnvelope | TimerEnvelope;
+export interface CallOfferEnvelope {
+  type: "call-offer";
+  callId: string;
+  kind: "voice" | "video";
+  sdp: string;
+}
+
+export interface CallAnswerEnvelope {
+  type: "call-answer";
+  callId: string;
+  sdp: string;
+}
+
+export interface CallIceEnvelope {
+  type: "call-ice";
+  callId: string;
+  candidate: RTCIceCandidateInit;
+}
+
+export interface CallEndEnvelope {
+  type: "call-end";
+  callId: string;
+  reason: "hangup" | "declined" | "cancelled" | "timeout" | "failed";
+}
+
+export type CallEnvelope = CallOfferEnvelope | CallAnswerEnvelope | CallIceEnvelope | CallEndEnvelope;
+
+function isCallEnvelope(envelope: Envelope): envelope is CallEnvelope {
+  return envelope.type === "call-offer" || envelope.type === "call-answer" || envelope.type === "call-ice" || envelope.type === "call-end";
+}
+
+type Envelope = TextEnvelope | FileEnvelope | ReceiptEnvelope | TimerEnvelope | CallEnvelope;
+
+/** Sends a call-signaling envelope through the same encrypted pipe as everything else - never shown as a chat message. */
+export async function sendCallSignal(contactId: string, envelope: CallEnvelope, account: LocalAccount, store: SignalStore): Promise<void> {
+  const ciphertext = store.encrypt(contactId, new TextEncoder().encode(JSON.stringify(envelope)));
+  await sendMessage(contactId, ciphertext, account);
+  await persistSession(store, contactId);
+}
 
 export const MAX_FILE_BYTES = 8 * 1024 * 1024;
 
@@ -141,7 +179,12 @@ export async function sendFile(
  * delivered/read receipts at all yet - only text does; add them if file
  * status tracking turns out to matter.
  */
-export async function poll(contactId: string, account: LocalAccount, store: SignalStore): Promise<ChatMessage[]> {
+export async function poll(
+  contactId: string,
+  account: LocalAccount,
+  store: SignalStore,
+  onCallSignal?: (envelope: CallEnvelope) => Promise<void>,
+): Promise<ChatMessage[]> {
   const received = await fetchMessages(account);
   const messages = await loadMessages(contactId);
 
@@ -159,7 +202,9 @@ export async function poll(contactId: string, account: LocalAccount, store: Sign
     const plaintext = store.decrypt(contactId, message.envelope);
     const envelope = JSON.parse(new TextDecoder().decode(plaintext)) as Envelope;
 
-    if (envelope.type === "text") {
+    if (isCallEnvelope(envelope)) {
+      await onCallSignal?.(envelope);
+    } else if (envelope.type === "text") {
       const timerSeconds = getTimerSeconds(contactId);
       messages.push({
         id: envelope.id,

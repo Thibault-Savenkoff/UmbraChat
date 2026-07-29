@@ -25,11 +25,12 @@ graph TB
         DB[(PostgreSQL - encrypted envelopes only)]
     end
 
-    TURN[coturn TURN relay]
+    STUN[Self-hosted STUN server]
 
     Clients -->|E2E encrypted envelopes over WSS| API
     API --> Routing --> DB
-    Clients -.->|WebRTC media| TURN
+    Clients -.->|address discovery| STUN
+    Web <-.->|direct P2P WebRTC media, no relay| Android
 ```
 
 ## Key decisions
@@ -38,7 +39,8 @@ graph TB
 - Federation is deferred to v2, but the schema is federation-shaped from day one (global-namespaced user IDs, a `routing` module kept separate from storage) specifically to avoid the rearchitecture that retrofitting federation usually forces.
 - Rust was picked over Go for the backend because `libsignal-client` has no official Go binding (only Rust/Swift/Kotlin/Node); using Rust everywhere it's needed (server + can share crypto reasoning with native clients) eliminates that risk entirely rather than mitigating it.
 - A Matrix-based stack (fork of Element/Synapse) was audited and rejected: mature and fast to ship, but Matrix federation exposes sender/recipient/timing metadata between homeservers by design, which conflicts with this project's zero-knowledge goal.
-- Hosting is entirely free-tier: a self-hosted VM (e.g. Oracle Cloud Always Free) for the server, database, and TURN relay, plus Vercel's free tier for the web PWA. This is a hard, permanent constraint, not a bootstrap-phase choice.
+- Hosting is entirely free-tier: a self-hosted VM (e.g. Oracle Cloud Always Free) for the server, database, and STUN server, plus Vercel's free tier for the web PWA. This is a hard, permanent constraint, not a bootstrap-phase choice.
+- Voice/video calls (issue #9) connect direct peer-to-peer via WebRTC, STUN-assisted (self-hosted STUN, negligible cost - it's out of the media path). No TURN relay: TURN would need to carry the actual audio/video bandwidth, an ongoing cost this project's $0-forever constraint can't absorb at any real usage, and symmetric/carrier-grade NAT calls that can't establish a direct path fail outright rather than falling back. Deliberately accepted, user-confirmed trade-off: unlike Signal (which relays every call through its own TURN servers specifically to hide each party's IP from the other), direct P2P here means both callers learn each other's public IP address - a real regression against this project's own privacy threat model, chosen anyway to keep the budget constraint. Revisit if a $0 TURN option becomes viable (e.g. a free-tier VM's bandwidth cap proves large enough in practice) or if the IP-exposure trade-off proves unacceptable.
 
 ## Gotchas
 

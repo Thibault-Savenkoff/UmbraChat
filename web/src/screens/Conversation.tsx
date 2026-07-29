@@ -6,9 +6,11 @@ interface ConversationProps {
   messages: ChatMessage[];
   onSend: (text: string) => void;
   onSendFile: (file: File) => void;
+  onStartCall: (kind: "voice" | "video") => void;
   onSetTimer: (seconds: number) => void;
   sending: boolean;
   fileStage?: FileSendStage;
+  callActive: boolean;
   timerSeconds: number;
   error?: string;
 }
@@ -55,7 +57,18 @@ function FileMessage({ message }: { message: ChatMessage }) {
   );
 }
 
-export function Conversation({ messages, onSend, onSendFile, onSetTimer, sending, fileStage, timerSeconds, error }: ConversationProps) {
+export function Conversation({
+  messages,
+  onSend,
+  onSendFile,
+  onStartCall,
+  onSetTimer,
+  sending,
+  fileStage,
+  callActive,
+  timerSeconds,
+  error,
+}: ConversationProps) {
   const [text, setText] = useState("");
   const [fileError, setFileError] = useState<string>();
 
@@ -81,6 +94,12 @@ export function Conversation({ messages, onSend, onSendFile, onSetTimer, sending
   return (
     <main>
       <h1>Conversation</h1>
+      <button onClick={() => onStartCall("voice")} disabled={callActive} aria-label="Voice call">
+        📞
+      </button>
+      <button onClick={() => onStartCall("video")} disabled={callActive} aria-label="Video call">
+        🎥
+      </button>
       <label>
         ⏱
         <select

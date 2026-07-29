@@ -12,7 +12,8 @@
     "e2e:messaging": "node e2e-messaging.mjs",
     "e2e:offline-sync": "node e2e-offline-sync.mjs",
     "e2e:file-sharing": "node e2e-file-sharing.mjs",
-    "e2e:disappearing-messages": "node e2e-disappearing-messages.mjs"
+    "e2e:disappearing-messages": "node e2e-disappearing-messages.mjs",
+    "e2e:voice-video-calls": "node e2e-voice-video-calls.mjs"
   },
   "dependencies": {
     "react": "^19.2.7",
