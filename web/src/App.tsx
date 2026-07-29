@@ -7,12 +7,17 @@ import { registerAccount } from "./api/register";
 import { completeLink } from "./api/devices";
 import { startConversation, sendText, sendFile, poll, getTimerSeconds, setDisappearingTimer, type FileSendStage } from "./chat/conversation";
 import { startCall, acceptCall, declineCall, hangUp, handleCallSignal, subscribeToCallState, getCallState, type CallState } from "./chat/call";
+import { createGroup, sendGroupText, removeMember, handleGroupSignal, loadAllGroups, type Group } from "./chat/group";
+import { openStore } from "./crypto/session";
+import { loadGroup } from "./storage/groupStore";
 import { CreateAccount } from "./screens/CreateAccount";
 import { SafetyNumber } from "./screens/SafetyNumber";
 import { LinkedDevices } from "./screens/LinkedDevices";
 import { NewConversation } from "./screens/NewConversation";
 import { Conversation } from "./screens/Conversation";
 import { CallScreen } from "./screens/CallScreen";
+import { Groups } from "./screens/Groups";
+import { GroupConversation } from "./screens/GroupConversation";
 
 const ACTIVE_CONTACT_KEY = "umbrachat:activeContactId";
 const POLL_INTERVAL_MS = 3000;
@@ -25,8 +30,9 @@ function isRinging(callState: CallState): boolean {
 type Status =
   | { status: "loading" }
   | { status: "anonymous" }
-  | { status: "identity-ready"; account: LocalAccount; safetyNumber: string }
-  | { status: "conversation"; account: LocalAccount; contactId: string; store: SignalStore; messages: ChatMessage[] };
+  | { status: "identity-ready"; account: LocalAccount; safetyNumber: string; groups: Group[] }
+  | { status: "conversation"; account: LocalAccount; contactId: string; store: SignalStore; messages: ChatMessage[] }
+  | { status: "group"; account: LocalAccount; group: Group; store: SignalStore; messages: ChatMessage[] };
 
 function App() {
   const [state, setState] = useState<Status>({ status: "loading" });
@@ -53,12 +59,35 @@ function App() {
         await enterConversation(existing, activeContactId);
         return;
       }
-      const safetyNumber = await computeSafetyNumber(existing.identity.identity_public_key);
-      setState({ status: "identity-ready", account: existing, safetyNumber });
+      await enterIdentityReady(existing);
     });
 
     return () => window.clearInterval(pollTimer.current);
   }, []);
+
+  // Shares the same pollTimer as enterConversation/enterGroup - a group invite
+  // has to be discoverable from here too (there's otherwise no way to learn
+  // about one without already knowing its groupId, or happening to have some
+  // unrelated 1:1 conversation open). Screens are mutually exclusive in this
+  // app, so there's no concurrent-poller risk in giving this one its own turn.
+  async function enterIdentityReady(account: LocalAccount) {
+    const safetyNumber = await computeSafetyNumber(account.identity.identity_public_key);
+    const groups = await loadAllGroups();
+    setState({ status: "identity-ready", account, safetyNumber, groups });
+
+    const store = await openStore(account.identity);
+    const runPoll = async () => {
+      await poll(undefined, account, store, undefined, handleGroupSignal);
+      const updatedGroups = await loadAllGroups();
+      setState((s) => (s.status === "identity-ready" ? { ...s, groups: updatedGroups } : s));
+    };
+
+    window.clearInterval(pollTimer.current);
+    pollTimer.current = undefined;
+    pollIntervalRef.current = POLL_INTERVAL_MS;
+    await runPoll();
+    pollTimer.current = window.setInterval(runPoll, POLL_INTERVAL_MS);
+  }
 
   async function enterConversation(account: LocalAccount, contactId: string) {
     const store = await startConversation(contactId, account);
@@ -68,7 +97,7 @@ function App() {
     localStorage.setItem(ACTIVE_CONTACT_KEY, contactId);
 
     const runPoll = async () => {
-      const updated = await poll(contactId, account, store, handleCallSignal);
+      const updated = await poll(contactId, account, store, handleCallSignal, handleGroupSignal);
       setState((s) => (s.status === "conversation" ? { ...s, messages: updated } : s));
       setTimerSecondsState(getTimerSeconds(contactId));
 
@@ -90,6 +119,32 @@ function App() {
     await runPoll();
   }
 
+  // Shares the exact same pollTimer/pollIntervalRef as enterConversation -
+  // GET /v1/messages is fetch-and-delete, so two independent poll loops would
+  // race to consume the same queued messages. Only one is ever active.
+  async function enterGroup(account: LocalAccount, groupId: string) {
+    const group = await loadGroup(groupId);
+    if (!group) return;
+    const store = await openStore(account.identity);
+    const messages = await loadMessages(groupId);
+    setState({ status: "group", account, group, store, messages });
+
+    const runPoll = async () => {
+      // poll()'s own return value is always [] with no contactId - a group's
+      // messages are written straight to storage by handleGroupSignal instead,
+      // so they're reloaded from there, not taken from poll()'s result.
+      await poll(undefined, account, store, undefined, handleGroupSignal);
+      const [refreshedGroup, updatedMessages] = await Promise.all([loadGroup(groupId), loadMessages(groupId)]);
+      setState((s) => (s.status === "group" && refreshedGroup ? { ...s, group: refreshedGroup, messages: updatedMessages } : s));
+    };
+
+    window.clearInterval(pollTimer.current);
+    pollTimer.current = undefined;
+    pollIntervalRef.current = POLL_INTERVAL_MS;
+    await runPoll();
+    pollTimer.current = window.setInterval(runPoll, POLL_INTERVAL_MS);
+  }
+
   async function handleCreate() {
     setCreating(true);
     setError(undefined);
@@ -98,8 +153,7 @@ function App() {
       const { accountId, deviceId } = await registerAccount(identity);
       const account: LocalAccount = { accountId, deviceId, identity };
       await saveAccount(account);
-      const safetyNumber = await computeSafetyNumber(identity.identity_public_key);
-      setState({ status: "identity-ready", account, safetyNumber });
+      await enterIdentityReady(account);
     } catch (err) {
       setError(err instanceof Error ? err.message : "registration failed");
     } finally {
@@ -115,8 +169,7 @@ function App() {
       const deviceId = await completeLink(accountId, code, "Linked Device", identity);
       const account: LocalAccount = { accountId, deviceId, identity };
       await saveAccount(account);
-      const safetyNumber = await computeSafetyNumber(identity.identity_public_key);
-      setState({ status: "identity-ready", account, safetyNumber });
+      await enterIdentityReady(account);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to link device");
     } finally {
@@ -172,6 +225,52 @@ function App() {
     await setDisappearingTimer(state.contactId, seconds, state.account, state.store);
   }
 
+  async function handleCreateGroup(name: string, memberAccountIds: string[]) {
+    if (state.status !== "identity-ready") return;
+    setCreating(true);
+    setError(undefined);
+    try {
+      const store = await openStore(state.account.identity);
+      await createGroup(name, memberAccountIds, state.account, store);
+      const groups = await loadAllGroups();
+      setState((s) => (s.status === "identity-ready" ? { ...s, groups } : s));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed to create group");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handleOpenGroup(groupId: string) {
+    if (state.status !== "identity-ready") return;
+    await enterGroup(state.account, groupId);
+  }
+
+  async function handleSendGroupText(text: string) {
+    if (state.status !== "group") return;
+    setSending(true);
+    setError(undefined);
+    try {
+      const messages = await sendGroupText(state.group.id, text, state.account, state.store);
+      setState((s) => (s.status === "group" ? { ...s, messages } : s));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed to send group message");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function handleRemoveMember(memberAccountId: string) {
+    if (state.status !== "group") return;
+    setError(undefined);
+    try {
+      const group = await removeMember(state.group.id, memberAccountId, state.account, state.store);
+      setState((s) => (s.status === "group" ? { ...s, group } : s));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed to remove member");
+    }
+  }
+
   if (state.status === "loading") return null;
 
   if (state.status === "anonymous") {
@@ -183,8 +282,23 @@ function App() {
       <>
         <SafetyNumber accountId={state.account.accountId} safetyNumber={state.safetyNumber} />
         <LinkedDevices account={state.account} />
+        <Groups groups={state.groups} onCreateGroup={handleCreateGroup} onOpenGroup={handleOpenGroup} creating={creating} error={error} />
         <NewConversation onStart={handleStartConversation} starting={starting} error={error} />
       </>
+    );
+  }
+
+  if (state.status === "group") {
+    return (
+      <GroupConversation
+        group={state.group}
+        account={state.account}
+        messages={state.messages}
+        onSend={handleSendGroupText}
+        onRemoveMember={handleRemoveMember}
+        sending={sending}
+        error={error}
+      />
     );
   }
 

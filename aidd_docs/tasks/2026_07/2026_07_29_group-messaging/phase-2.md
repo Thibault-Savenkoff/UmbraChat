@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Web - create-group flow, group conversation screen, remove member
@@ -81,6 +81,6 @@ Group conversation screen:
 | 2 | Removing a member from the group screen: a message sent afterward reaches only the remaining members |
 | 1 | The groups list shows a newly created group immediately on the creator's own device, without needing a poll round trip (it's local before any fan-out even completes) |
 
-## Known limitation, named not hidden
+## Correction made during implementation
 
-New group invites are only discovered while the shared poller is already running - i.e. while a 1:1 conversation or a group conversation is open. Sitting on the bare identity-ready/groups-list screen with nothing open does not poll (the exact same limitation 1:1 messaging already has - there is no background polling anywhere in this app yet). A group invite that arrives while idle is picked up the next time any conversation is opened.
+The plan originally scoped the identity-ready/groups-list screen as *not* polling, matching 1:1 messaging's existing "no background polling" limitation - reasoned as acceptable since a group invite would still be picked up the next time some other screen polled. On reflection this made the feature nearly unusable for the common case: a brand-new invitee has no groupId to open and may have no unrelated 1:1 conversation open either, so they'd have no way to ever discover the invite. Screens in this app are mutually exclusive (never two open at once), so there was no real concurrent-fetch-and-delete risk in giving the identity-ready screen its own turn on the same shared poller - added via a new `enterIdentityReady` following the exact same pattern `enterConversation`/`enterGroup` already use.
