@@ -5,6 +5,7 @@ import { loadAccount, saveAccount, type LocalAccount } from "./storage/keyStore"
 import { loadMessages, type ChatMessage } from "./storage/messageStore";
 import { registerAccount } from "./api/register";
 import { startConversation, sendText, sendFile, poll, type FileSendStage } from "./chat/conversation";
+import { startCall, acceptCall, declineCall, hangUp, handleCallSignal, subscribeToCallState, getCallState, type CallState } from "./chat/call";
 import { CreateAccount } from "./screens/CreateAccount";
 import { SafetyNumber } from "./screens/SafetyNumber";
 import { NewConversation } from "./screens/NewConversation";
@@ -25,8 +26,11 @@ function App() {
   const [starting, setStarting] = useState(false);
   const [sending, setSending] = useState(false);
   const [fileStage, setFileStage] = useState<FileSendStage>();
+  const [callState, setCallState] = useState<CallState>(getCallState());
   const [error, setError] = useState<string>();
   const pollTimer = useRef<number>(undefined);
+
+  useEffect(() => subscribeToCallState(setCallState), []);
 
   useEffect(() => {
     loadAccount().then(async (existing) => {
@@ -53,7 +57,7 @@ function App() {
     localStorage.setItem(ACTIVE_CONTACT_KEY, contactId);
 
     const runPoll = async () => {
-      const updated = await poll(contactId, account, store);
+      const updated = await poll(contactId, account, store, handleCallSignal);
       setState((s) => (s.status === "conversation" ? { ...s, messages: updated } : s));
     };
 
@@ -138,15 +142,40 @@ function App() {
     );
   }
 
+  const { contactId, account, store } = state;
+
   return (
-    <Conversation
-      messages={state.messages}
-      onSend={handleSend}
-      onSendFile={handleSendFile}
-      sending={sending}
-      fileStage={fileStage}
-      error={error}
-    />
+    <>
+      {/* ponytail: bare phase-1 scaffold - real signaling wiring needs something to
+          trigger it end-to-end. Replaced by the polished banner/active-call screen
+          in phase 3. */}
+      <div data-testid="call-scaffold">
+        <pre data-testid="call-state">{JSON.stringify(callState)}</pre>
+        {(callState.status === "idle" || callState.status === "ended") && (
+          <>
+            <button onClick={() => void startCall(contactId, "voice", account, store)}>Call</button>
+            <button onClick={() => void startCall(contactId, "video", account, store)}>Video Call</button>
+          </>
+        )}
+        {callState.status === "incoming-ringing" && (
+          <>
+            <button onClick={() => void acceptCall(contactId, account, store)}>Accept</button>
+            <button onClick={() => void declineCall(contactId, account, store)}>Decline</button>
+          </>
+        )}
+        {(callState.status === "outgoing-ringing" || callState.status === "connecting" || callState.status === "connected") && (
+          <button onClick={() => void hangUp(contactId, account, store)}>Hang Up</button>
+        )}
+      </div>
+      <Conversation
+        messages={state.messages}
+        onSend={handleSend}
+        onSendFile={handleSendFile}
+        sending={sending}
+        fileStage={fileStage}
+        error={error}
+      />
+    </>
   );
 }
 

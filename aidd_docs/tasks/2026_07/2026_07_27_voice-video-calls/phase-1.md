@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Signaling envelopes and call state machine
@@ -53,6 +53,13 @@ flowchart TD
 > Ringing and ICE exchange need faster round trips than the 3s message-poll interval; connected calls don't poll for signaling at all (the data channel/media path is already live).
 
 1. Expose the current `CallState` so the poll loop (in `App.tsx`, phase 3) can react to it - out of scope here beyond returning the state; the interval change itself is a phase-3 wiring task
+
+### 4) Minimal App.tsx wiring, for real end-to-end testability
+
+> Amendment made during implementation: phase 1's own acceptance criteria needs two live browser instances actually completing a signaling exchange, which is impossible to verify through the real app without at least routing signals and having *some* way to trigger a call - can't be deferred to phase 3 like the polished UI can.
+
+1. `App.tsx`: pass `handleCallSignal` as `poll()`'s new `onCallSignal` argument, unconditionally (no interval change yet - that part is still phase 3)
+2. Bare, temporary trigger controls (a couple of buttons + a raw `CallState` readout) directly in `App.tsx`'s conversation view - not the polished banner/active-call screen, which is phase 3's job and will replace this outright
 
 ## Test acceptance criteria
 
