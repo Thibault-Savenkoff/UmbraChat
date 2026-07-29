@@ -6,8 +6,10 @@ interface ConversationProps {
   messages: ChatMessage[];
   onSend: (text: string) => void;
   onSendFile: (file: File) => void;
+  onStartCall: (kind: "voice" | "video") => void;
   sending: boolean;
   fileStage?: FileSendStage;
+  callActive: boolean;
   error?: string;
 }
 
@@ -45,7 +47,7 @@ function FileMessage({ message }: { message: ChatMessage }) {
   );
 }
 
-export function Conversation({ messages, onSend, onSendFile, sending, fileStage, error }: ConversationProps) {
+export function Conversation({ messages, onSend, onSendFile, onStartCall, sending, fileStage, callActive, error }: ConversationProps) {
   const [text, setText] = useState("");
   const [fileError, setFileError] = useState<string>();
 
@@ -71,6 +73,12 @@ export function Conversation({ messages, onSend, onSendFile, sending, fileStage,
   return (
     <main>
       <h1>Conversation</h1>
+      <button onClick={() => onStartCall("voice")} disabled={callActive} aria-label="Voice call">
+        📞
+      </button>
+      <button onClick={() => onStartCall("video")} disabled={callActive} aria-label="Video call">
+        🎥
+      </button>
       <ul data-testid="message-list">
         {messages.map((m) => (
           <li key={m.id} data-testid={`message-${m.direction}`}>

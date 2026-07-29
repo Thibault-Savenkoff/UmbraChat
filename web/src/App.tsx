@@ -10,9 +10,15 @@ import { CreateAccount } from "./screens/CreateAccount";
 import { SafetyNumber } from "./screens/SafetyNumber";
 import { NewConversation } from "./screens/NewConversation";
 import { Conversation } from "./screens/Conversation";
+import { CallScreen } from "./screens/CallScreen";
 
 const ACTIVE_CONTACT_KEY = "umbrachat:activeContactId";
 const POLL_INTERVAL_MS = 3000;
+const CALL_POLL_INTERVAL_MS = 500;
+
+function isRinging(callState: CallState): boolean {
+  return callState.status === "outgoing-ringing" || callState.status === "incoming-ringing";
+}
 
 type Status =
   | { status: "loading" }
@@ -29,12 +35,7 @@ function App() {
   const [callState, setCallState] = useState<CallState>(getCallState());
   const [error, setError] = useState<string>();
   const pollTimer = useRef<number>(undefined);
-  // Debug-only, for the phase-1/2 scaffold: "ended" carries no stream field, so
-  // this keeps the last known local stream visible to confirm hangUp actually
-  // stopped its tracks (readyState reads live off the real MediaStream each
-  // render, not a snapshot). Gone once phase 3 removes the scaffold.
-  const lastLocalStreamRef = useRef<MediaStream | null>(null);
-  if ("localStream" in callState) lastLocalStreamRef.current = callState.localStream;
+  const pollIntervalRef = useRef(POLL_INTERVAL_MS);
 
   useEffect(() => subscribeToCallState(setCallState), []);
 
@@ -65,13 +66,23 @@ function App() {
     const runPoll = async () => {
       const updated = await poll(contactId, account, store, handleCallSignal);
       setState((s) => (s.status === "conversation" ? { ...s, messages: updated } : s));
+
+      // Ringing needs faster signaling round trips than the normal message-poll
+      // interval. This is the only place that schedules the interval (including
+      // the very first time), so there's never more than one running at once.
+      const desiredInterval = isRinging(getCallState()) ? CALL_POLL_INTERVAL_MS : POLL_INTERVAL_MS;
+      if (desiredInterval !== pollIntervalRef.current || pollTimer.current === undefined) {
+        pollIntervalRef.current = desiredInterval;
+        window.clearInterval(pollTimer.current);
+        pollTimer.current = window.setInterval(runPoll, desiredInterval);
+      }
     };
 
     window.clearInterval(pollTimer.current);
+    pollTimer.current = undefined;
     // setInterval only fires after a full interval elapses - poll once immediately
     // too, so messages queued while offline show up on reconnect without delay.
     await runPoll();
-    pollTimer.current = window.setInterval(runPoll, POLL_INTERVAL_MS);
   }
 
   async function handleCreate() {
@@ -150,49 +161,24 @@ function App() {
 
   const { contactId, account, store } = state;
 
-  // MediaStream doesn't serialize usefully via JSON.stringify (no enumerable own
-  // properties) - summarize the track kinds/readyState instead, for the debug
-  // readout below. Scaffold-only; gone once phase 3 replaces this with real
-  // <video>/<audio> elements bound to the streams directly.
-  function summarizeStream(stream: MediaStream | null | undefined) {
-    return stream?.getTracks().map((t) => ({ kind: t.kind, readyState: t.readyState })) ?? null;
-  }
-  const callStateSummary = {
-    ...callState,
-    ...("localStream" in callState ? { localStream: summarizeStream(callState.localStream) } : {}),
-    ...("remoteStream" in callState ? { remoteStream: summarizeStream(callState.remoteStream) } : {}),
-    lastLocalTracks: summarizeStream(lastLocalStreamRef.current),
-  };
-
   return (
     <>
-      {/* ponytail: bare phase-1 scaffold - real signaling wiring needs something to
-          trigger it end-to-end. Replaced by the polished banner/active-call screen
-          in phase 3. */}
-      <div data-testid="call-scaffold">
-        <pre data-testid="call-state">{JSON.stringify(callStateSummary)}</pre>
-        {(callState.status === "idle" || callState.status === "ended") && (
-          <>
-            <button onClick={() => void startCall(contactId, "voice", account, store)}>Call</button>
-            <button onClick={() => void startCall(contactId, "video", account, store)}>Video Call</button>
-          </>
-        )}
-        {callState.status === "incoming-ringing" && (
-          <>
-            <button onClick={() => void acceptCall(contactId, account, store)}>Accept</button>
-            <button onClick={() => void declineCall(contactId, account, store)}>Decline</button>
-          </>
-        )}
-        {(callState.status === "outgoing-ringing" || callState.status === "connecting" || callState.status === "connected") && (
-          <button onClick={() => void hangUp(contactId, account, store)}>Hang Up</button>
-        )}
-      </div>
+      {callState.status !== "idle" && (
+        <CallScreen
+          callState={callState}
+          onAccept={() => void acceptCall(contactId, account, store)}
+          onDecline={() => void declineCall(contactId, account, store)}
+          onHangUp={() => void hangUp(contactId, account, store)}
+        />
+      )}
       <Conversation
         messages={state.messages}
         onSend={handleSend}
         onSendFile={handleSendFile}
+        onStartCall={(kind) => void startCall(contactId, kind, account, store)}
         sending={sending}
         fileStage={fileStage}
+        callActive={callState.status !== "idle" && callState.status !== "ended"}
         error={error}
       />
     </>

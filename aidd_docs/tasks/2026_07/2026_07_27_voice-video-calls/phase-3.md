@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Web - call controls, incoming-call banner, active-call screen
