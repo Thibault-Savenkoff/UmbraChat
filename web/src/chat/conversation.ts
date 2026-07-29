@@ -82,6 +82,12 @@ function sessionKey(contactAccountId: string, deviceId: string): string {
  */
 async function sendToContact(contactId: string, plaintext: Uint8Array, account: LocalAccount, store: SignalStore): Promise<void> {
   const devices = await listDevices(contactId, account);
+  // list_devices returns an empty array rather than 404ing for an unknown
+  // account (see server/src/routes/devices.rs), so an empty list here would
+  // otherwise loop zero times and silently "succeed" without sending anything -
+  // a real regression from the old single-device flow, which validated the
+  // contact existed (via a 404) before any message could be typed.
+  if (devices.length === 0) throw new Error("this contact has no reachable devices");
   for (const device of devices) {
     const key = sessionKey(contactId, device.id);
     await restoreSession(store, key);

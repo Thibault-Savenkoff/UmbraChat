@@ -58,6 +58,19 @@ check("found and clicked Unlink on the non-primary device", unlinked);
 await deviceA.waitForFunction(() => document.querySelectorAll('[data-testid="device-row"]').length === 1, { timeout: 15000 });
 check("device A's list shows only one device after unlinking", true);
 
+// Sending to a nonexistent account must fail loudly, not silently vanish -
+// list_devices returns an empty array rather than 404ing for an unknown
+// account, so sendToContact has to reject a zero-device fan-out itself.
+const ghostAccountId = "00000000-0000-0000-0000-000000000000";
+await deviceA.fill('input[placeholder="Recipient account id"]', ghostAccountId);
+await deviceA.click("text=Start Conversation");
+await deviceA.waitForSelector('input[placeholder="Type a message..."]', { timeout: 15000 });
+await deviceA.fill('input[placeholder="Type a message..."]', "into the void");
+await deviceA.click("text=Send");
+await deviceA.waitForSelector('[role="alert"]', { timeout: 15000 });
+const ghostError = await deviceA.textContent('[role="alert"]');
+check("sending to a nonexistent account shows a visible error instead of silently vanishing", ghostError.toLowerCase().includes("no reachable devices"), ghostError);
+
 await browser.close();
 
 const failed = checks.some((ok) => !ok);
