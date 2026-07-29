@@ -86,4 +86,4 @@ Active call screen:
 | 1, 2 | Two independent app instances, fake media devices: A calls B, B accepts, both see the active-call screen with live remote video |
 | 1, 2 | B declines: A sees a distinct "Declined" state, not a silent hang or a generic error |
 | 2 | A voice call never renders a remote `<video>` element with a real stream attached - audio only |
-| 1 | The poll interval measurably tightens during ringing (an incoming offer appears well under 3s) |
+| 1 | The poll interval measurably tightens once both sides are already ringing: the answer+ICE round trip (accept-to-connected) completes well under the 3s message-poll interval. Correction made during implementation: the *first* incoming-offer notification is still bounded by the callee's standing 3s rate - the callee has no way to know to poll faster before it has already seen the offer, so that hop can't be sped up by this mechanism. A known, accepted latency floor of reusing HTTP polling instead of a push channel, not a bug |
