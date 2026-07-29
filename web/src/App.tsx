@@ -5,7 +5,7 @@ import { loadAccount, saveAccount, type LocalAccount } from "./storage/keyStore"
 import { loadMessages, type ChatMessage } from "./storage/messageStore";
 import { registerAccount } from "./api/register";
 import { completeLink } from "./api/devices";
-import { startConversation, sendText, sendFile, poll, getTimerSeconds, setDisappearingTimer, type FileSendStage } from "./chat/conversation";
+import { startConversation, sendText, sendFile, markFileOpened, poll, getTimerSeconds, setDisappearingTimer, type FileSendStage, type FileDestruct } from "./chat/conversation";
 import { startCall, acceptCall, declineCall, hangUp, handleCallSignal, subscribeToCallState, getCallState, type CallState } from "./chat/call";
 import { createGroup, sendGroupText, removeMember, handleGroupSignal, loadAllGroups, type Group } from "./chat/group";
 import { openStore } from "./crypto/session";
@@ -204,12 +204,12 @@ function App() {
     }
   }
 
-  async function handleSendFile(file: File) {
+  async function handleSendFile(file: File, destruct?: FileDestruct) {
     if (state.status !== "conversation") return;
     setSending(true);
     setError(undefined);
     try {
-      const messages = await sendFile(state.contactId, file, state.account, state.store, setFileStage);
+      const messages = await sendFile(state.contactId, file, state.account, state.store, setFileStage, destruct);
       setState((s) => (s.status === "conversation" ? { ...s, messages } : s));
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to send file");
@@ -217,6 +217,12 @@ function App() {
       setSending(false);
       setFileStage(undefined);
     }
+  }
+
+  async function handleOpenFile(messageId: string) {
+    if (state.status !== "conversation") return;
+    const messages = await markFileOpened(state.contactId, messageId, state.account, state.store);
+    setState((s) => (s.status === "conversation" ? { ...s, messages } : s));
   }
 
   async function handleSetTimer(seconds: number) {
@@ -318,6 +324,7 @@ function App() {
         messages={state.messages}
         onSend={handleSend}
         onSendFile={handleSendFile}
+        onOpenFile={handleOpenFile}
         onStartCall={(kind) => void startCall(contactId, kind, account, store)}
         onSetTimer={handleSetTimer}
         sending={sending}
