@@ -15,6 +15,8 @@ export interface ChatMessage {
   status: "sent" | "delivered" | "read";
   createdAt: string;
   file?: ChatFile;
+  timerSeconds?: number;
+  expiresAt?: string;
 }
 
 function openDb(): Promise<IDBDatabase> {
