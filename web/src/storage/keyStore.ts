@@ -8,6 +8,7 @@ const RECORD_KEY = "self";
 
 export interface LocalAccount {
   accountId: string;
+  deviceId: string;
   identity: IdentityBundle;
 }
 

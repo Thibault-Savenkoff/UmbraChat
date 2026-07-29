@@ -21,8 +21,8 @@ interface RawBundleResponse {
   one_time_prekey: { key_id: number; public_key: string } | null;
 }
 
-export async function fetchPrekeyBundle(contactAccountId: string, account: LocalAccount): Promise<ContactBundle> {
-  const path = `/v1/accounts/${contactAccountId}/prekey-bundle`;
+export async function fetchPrekeyBundle(deviceId: string, account: LocalAccount): Promise<ContactBundle> {
+  const path = `/v1/devices/${deviceId}/prekey-bundle`;
   const response = await signedFetch(path, "GET", account);
 
   if (!response.ok) {

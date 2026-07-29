@@ -1,8 +1,9 @@
 import type { SignalStore } from "wasm-crypto";
 import type { LocalAccount } from "../storage/keyStore";
-import { openStore, persistSession } from "../crypto/session";
+import { openStore, persistSession, restoreSession } from "../crypto/session";
 import { fetchPrekeyBundle } from "../api/prekeyBundle";
 import { sendMessage, fetchMessages } from "../api/messages";
+import { listDevices } from "../api/devices";
 import { loadMessages, saveMessages, type ChatMessage } from "../storage/messageStore";
 
 interface TextEnvelope {
@@ -70,11 +71,46 @@ function isCallEnvelope(envelope: Envelope): envelope is CallEnvelope {
 
 type Envelope = TextEnvelope | FileEnvelope | ReceiptEnvelope | FileOpenedEnvelope | TimerEnvelope | CallEnvelope;
 
+/** The composite session address a contact's specific device is addressed by.
+ * `wasm-crypto` treats this as an opaque string name (its own device_id field
+ * stays hardcoded at 1) - two different devices are just two different names,
+ * no Rust/WASM changes needed for multi-device. See the plan's Decisions. */
+function sessionKey(contactAccountId: string, deviceId: string): string {
+  return `${contactAccountId}:${deviceId}`;
+}
+
+/**
+ * Fans an envelope out to every one of `contactId`'s current devices,
+ * establishing a session with any device that doesn't have one yet.
+ * Every send site in this module routes through here - one place that knows
+ * how to reach "a contact," not one per envelope type. Re-fetches the device
+ * list on every call rather than caching it, so a contact's newly linked
+ * device is included in the very next send with no extra wiring.
+ */
+async function sendToContact(contactId: string, plaintext: Uint8Array, account: LocalAccount, store: SignalStore): Promise<void> {
+  const devices = await listDevices(contactId, account);
+  // list_devices returns an empty array rather than 404ing for an unknown
+  // account (see server/src/routes/devices.rs), so an empty list here would
+  // otherwise loop zero times and silently "succeed" without sending anything -
+  // a real regression from the old single-device flow, which validated the
+  // contact existed (via a 404) before any message could be typed.
+  if (devices.length === 0) throw new Error("this contact has no reachable devices");
+  for (const device of devices) {
+    const key = sessionKey(contactId, device.id);
+    await restoreSession(store, key);
+    if (!store.has_session(key)) {
+      const bundle = await fetchPrekeyBundle(device.id, account);
+      store.establish_session(key, bundle);
+    }
+    const ciphertext = store.encrypt(key, plaintext);
+    await sendMessage(device.id, ciphertext, account);
+    await persistSession(store, key);
+  }
+}
+
 /** Sends a call-signaling envelope through the same encrypted pipe as everything else - never shown as a chat message. */
 export async function sendCallSignal(contactId: string, envelope: CallEnvelope, account: LocalAccount, store: SignalStore): Promise<void> {
-  const ciphertext = store.encrypt(contactId, new TextEncoder().encode(JSON.stringify(envelope)));
-  await sendMessage(contactId, ciphertext, account);
-  await persistSession(store, contactId);
+  await sendToContact(contactId, new TextEncoder().encode(JSON.stringify(envelope)), account, store);
 }
 
 export const MAX_FILE_BYTES = 8 * 1024 * 1024;
@@ -98,30 +134,19 @@ function setTimerSecondsLocal(contactId: string, seconds: number): void {
 
 export async function setDisappearingTimer(contactId: string, seconds: number, account: LocalAccount, store: SignalStore): Promise<void> {
   const envelope: TimerEnvelope = { type: "timer", seconds };
-  const ciphertext = store.encrypt(contactId, new TextEncoder().encode(JSON.stringify(envelope)));
-  await sendMessage(contactId, ciphertext, account);
-  await persistSession(store, contactId);
+  await sendToContact(contactId, new TextEncoder().encode(JSON.stringify(envelope)), account, store);
   setTimerSecondsLocal(contactId, seconds);
 }
 
-/** Opens the local store, restoring any persisted session, and establishes one with the contact if needed. */
-export async function startConversation(contactId: string, account: LocalAccount): Promise<SignalStore> {
-  const store = await openStore(account.identity, contactId);
-  if (!store.has_session(contactId)) {
-    const bundle = await fetchPrekeyBundle(contactId, account);
-    store.establish_session(contactId, bundle);
-    await persistSession(store, contactId);
-  }
-  return store;
+/** Opens the local store. Sessions are established lazily per device inside
+ * `sendToContact`/`poll`, so there's nothing left for this to do eagerly. */
+export async function startConversation(_contactId: string, account: LocalAccount): Promise<SignalStore> {
+  return openStore(account.identity);
 }
 
 export async function sendText(contactId: string, text: string, account: LocalAccount, store: SignalStore): Promise<ChatMessage[]> {
   const envelope: TextEnvelope = { type: "text", id: crypto.randomUUID(), body: text };
-  const plaintext = new TextEncoder().encode(JSON.stringify(envelope));
-  const ciphertext = store.encrypt(contactId, plaintext);
-
-  await sendMessage(contactId, ciphertext, account);
-  await persistSession(store, contactId);
+  await sendToContact(contactId, new TextEncoder().encode(JSON.stringify(envelope)), account, store);
 
   const messages = await loadMessages(contactId);
   const timerSeconds = getTimerSeconds(contactId);
@@ -160,12 +185,9 @@ export async function sendFile(
     ...(destruct && "onOpen" in destruct ? { destructOnOpen: true } : {}),
     ...(destruct && "afterSeconds" in destruct ? { timerSeconds: destruct.afterSeconds } : {}),
   };
-  const plaintext = new TextEncoder().encode(JSON.stringify(envelope));
-  const ciphertext = store.encrypt(contactId, plaintext);
 
   onStage("sending");
-  await sendMessage(contactId, ciphertext, account);
-  await persistSession(store, contactId);
+  await sendToContact(contactId, new TextEncoder().encode(JSON.stringify(envelope)), account, store);
 
   const messages = await loadMessages(contactId);
   messages.push({
@@ -192,9 +214,7 @@ export async function sendFile(
  */
 export async function markFileOpened(contactId: string, messageId: string, account: LocalAccount, store: SignalStore): Promise<ChatMessage[]> {
   const receipt: FileOpenedEnvelope = { type: "file-opened", refId: messageId };
-  const ciphertext = store.encrypt(contactId, new TextEncoder().encode(JSON.stringify(receipt)));
-  await sendMessage(contactId, ciphertext, account);
-  await persistSession(store, contactId);
+  await sendToContact(contactId, new TextEncoder().encode(JSON.stringify(receipt)), account, store);
 
   const messages = await loadMessages(contactId);
   const target = messages.find((m) => m.id === messageId);
@@ -234,7 +254,9 @@ export async function poll(
       continue;
     }
 
-    const plaintext = store.decrypt(contactId, message.envelope);
+    const key = sessionKey(message.senderAccountId, message.senderDeviceId);
+    await restoreSession(store, key);
+    const plaintext = store.decrypt(key, message.envelope);
     const envelope = JSON.parse(new TextDecoder().decode(plaintext)) as Envelope;
 
     if (isCallEnvelope(envelope)) {
@@ -254,8 +276,7 @@ export async function poll(
 
       for (const type of ["delivered", "read"] as const) {
         const receipt: ReceiptEnvelope = { type, refId: envelope.id };
-        const receiptCiphertext = store.encrypt(contactId, new TextEncoder().encode(JSON.stringify(receipt)));
-        await sendMessage(contactId, receiptCiphertext, account);
+        await sendToContact(contactId, new TextEncoder().encode(JSON.stringify(receipt)), account, store);
       }
     } else if (envelope.type === "file") {
       messages.push({
@@ -283,7 +304,7 @@ export async function poll(
       }
     }
 
-    await persistSession(store, contactId);
+    await persistSession(store, key);
   }
 
   const now = Date.now();

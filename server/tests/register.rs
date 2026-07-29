@@ -73,6 +73,8 @@ async fn register_with_valid_bundle_returns_201() {
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     let json: Value = serde_json::from_slice(&bytes).unwrap();
     let account_id: uuid::Uuid = json["account_id"].as_str().expect("account_id must be a string").parse().unwrap();
+    let device_id: uuid::Uuid = json["device_id"].as_str().expect("device_id must be a string").parse().unwrap();
+    assert_ne!(account_id, device_id, "the first device must not reuse the account's own id");
 
     // Clean up so repeated test runs don't accumulate rows in the dev database.
     let pool = db::connect().await;

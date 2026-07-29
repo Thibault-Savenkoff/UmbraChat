@@ -17,10 +17,10 @@ const MAX_BODY_BYTES: usize = 12 * 1024 * 1024;
 
 /// Verifies a request signed by the caller's identity private key: the signed
 /// message is `METHOD\nPATH\nTIMESTAMP\nSHA256_HEX(BODY)`, checked against the
-/// account's stored identity public key. No sessions, no tokens.
+/// device's stored identity public key. No sessions, no tokens.
 async fn verify(
     pool: &PgPool,
-    account_id: Uuid,
+    device_id: Uuid,
     timestamp_header: &str,
     signature_header: &str,
     method: &str,
@@ -35,12 +35,12 @@ async fn verify(
 
     let signature_bytes = STANDARD.decode(signature_header).map_err(|_| unauthorized("invalid X-Signature"))?;
 
-    let public_key_bytes = sqlx::query_scalar!("SELECT public_key FROM identity_keys WHERE account_id = $1", account_id)
+    let public_key_bytes = sqlx::query_scalar!("SELECT public_key FROM identity_keys WHERE device_id = $1", device_id)
         .fetch_optional(pool)
         .await
         .map_err(|_| server_error())?
-        .ok_or_else(|| unauthorized("unknown account"))?;
-    let identity_key = IdentityKey::decode(&public_key_bytes).map_err(|_| unauthorized("unknown account"))?;
+        .ok_or_else(|| unauthorized("unknown device"))?;
+    let identity_key = IdentityKey::decode(&public_key_bytes).map_err(|_| unauthorized("unknown device"))?;
 
     let body_hash = hex::encode(Sha256::digest(body));
     let message = format!("{method}\n{path}\n{timestamp}\n{body_hash}");
@@ -52,13 +52,13 @@ async fn verify(
     Ok(())
 }
 
-fn account_id_header(parts: &Parts) -> Result<Uuid, ApiError> {
+fn device_id_header(parts: &Parts) -> Result<Uuid, ApiError> {
     parts
         .headers
-        .get("x-account-id")
+        .get("x-device-id")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse().ok())
-        .ok_or_else(|| unauthorized("missing or invalid X-Account-Id"))
+        .ok_or_else(|| unauthorized("missing or invalid X-Device-Id"))
 }
 
 fn header_str<'a>(parts: &'a Parts, name: &str) -> Result<&'a str, ApiError> {
@@ -70,9 +70,9 @@ fn header_str<'a>(parts: &'a Parts, name: &str) -> Result<&'a str, ApiError> {
 }
 
 /// For authenticated requests with no body (GET). Signs over an empty body hash.
-pub struct AuthenticatedAccount(pub Uuid);
+pub struct AuthenticatedDevice(pub Uuid);
 
-impl<S> FromRequestParts<S> for AuthenticatedAccount
+impl<S> FromRequestParts<S> for AuthenticatedDevice
 where
     S: Send + Sync,
     PgPool: FromRef<S>,
@@ -81,17 +81,17 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let pool = PgPool::from_ref(state);
-        let account_id = account_id_header(parts)?;
+        let device_id = device_id_header(parts)?;
         let timestamp = header_str(parts, "x-timestamp")?.to_string();
         let signature = header_str(parts, "x-signature")?.to_string();
-        verify(&pool, account_id, &timestamp, &signature, parts.method.as_str(), parts.uri.path(), b"").await?;
-        Ok(AuthenticatedAccount(account_id))
+        verify(&pool, device_id, &timestamp, &signature, parts.method.as_str(), parts.uri.path(), b"").await?;
+        Ok(AuthenticatedDevice(device_id))
     }
 }
 
 /// For authenticated requests with a JSON body (POST). Signs over the body's hash.
 pub struct Authenticated<T> {
-    pub account_id: Uuid,
+    pub device_id: Uuid,
     pub body: T,
 }
 
@@ -106,7 +106,7 @@ where
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         let pool = PgPool::from_ref(state);
         let (parts, body) = req.into_parts();
-        let account_id = account_id_header(&parts)?;
+        let device_id = device_id_header(&parts)?;
         let timestamp = header_str(&parts, "x-timestamp")?.to_string();
         let signature = header_str(&parts, "x-signature")?.to_string();
 
@@ -114,9 +114,9 @@ where
             .await
             .map_err(|_| unauthorized("failed to read request body"))?;
 
-        verify(&pool, account_id, &timestamp, &signature, parts.method.as_str(), parts.uri.path(), &body_bytes).await?;
+        verify(&pool, device_id, &timestamp, &signature, parts.method.as_str(), parts.uri.path(), &body_bytes).await?;
 
         let body: T = serde_json::from_slice(&body_bytes).map_err(|_| unauthorized("invalid request body"))?;
-        Ok(Authenticated { account_id, body })
+        Ok(Authenticated { device_id, body })
     }
 }
