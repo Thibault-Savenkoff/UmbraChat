@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Group envelopes, local roster, fan-out send/receive
@@ -54,10 +54,12 @@ flowchart TD
 
 ### 4) `chat/group.ts`: create, send, receive, remove
 
-1. `createGroup(name, memberAccountIds, account, store)`: generates a `groupId`, saves the roster locally (`memberAccountIds` excludes the caller, same convention `contactId` already uses), fans out a `group-invite` to every member via `sendToContact`
-2. `sendGroupText(groupId, text, account, store)`: loads the local roster, fans out a `group-text` to every current member, saves the caller's own sent copy locally
-3. `removeMember(groupId, memberAccountId, account, store)`: updates the local roster (member removed), fans out `group-update` with the new roster to the new roster only - the removed member is never sent it
-4. `handleGroupSignal(envelope, senderAccountId, account, store)` (the `onGroupSignal` callback): `group-invite` saves a new local group; `group-update` overwrites the local roster (and if the caller's own account is no longer in it, the group is left in local storage but no longer actionable - out of scope to actively purge it, matches how removed contacts aren't purged elsewhere either); `group-text` is appended to that group's local history *only if* `senderAccountId` is still present in the local roster for that `groupId` - the removal-enforcement check
+> Amendment made during implementation: a member-relative roster (`memberAccountIds` meaning "everyone except me") can't be broadcast unchanged - what it excludes is different for every recipient. The envelope's `memberAccountIds` is the *full* roster, including the sender; every recipient stores that exact array unmodified, and only filters out their own account at fan-out time.
+
+1. `createGroup(name, otherMemberAccountIds, account, store)`: generates a `groupId`, builds the full roster (`[account.accountId, ...otherMemberAccountIds]`), saves it locally, fans out a `group-invite` carrying that full roster to every other member via `sendToContact`
+2. `sendGroupText(groupId, text, account, store)`: loads the local (full) roster, fans out a `group-text` to every member except the caller, saves the caller's own sent copy locally
+3. `removeMember(groupId, memberAccountId, account, store)`: computes the new full roster with that member filtered out, saves it locally, fans out `group-update` carrying the new roster to every remaining member except the caller - the removed member is never sent it
+4. `handleGroupSignal(envelope, senderAccountId)` (the `onGroupSignal` callback, purely reactive - never sends, doesn't need account/store): `group-invite` saves a new local group with the envelope's full roster as-is; `group-update` overwrites the local roster **only if the sender is already a member of the group's *current* local roster** (the actual authorization check - without it, anyone who ever learns a `groupId`, including an already-removed member, could rewrite a recipient's view of who's in it); `group-text` is appended to that group's local history *only if* `senderAccountId` is still present in the local roster for that `groupId` - the removal-enforcement check
 
 ## Test acceptance criteria
 
