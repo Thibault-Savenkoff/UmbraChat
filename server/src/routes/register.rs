@@ -35,6 +35,7 @@ pub struct RegisterRequest {
 #[derive(Serialize)]
 pub struct RegisterResponse {
     pub account_id: Uuid,
+    pub device_id: Uuid,
 }
 
 const MAX_ONE_TIME_PREKEYS: usize = 100;
@@ -99,9 +100,14 @@ pub async fn register(
         .await
         .map_err(|_| server_error())?;
 
+    let device_id = sqlx::query_scalar!("INSERT INTO devices (account_id, label) VALUES ($1, 'Primary') RETURNING id", account_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|_| server_error())?;
+
     sqlx::query!(
-        "INSERT INTO identity_keys (account_id, public_key, registration_id) VALUES ($1, $2, $3)",
-        account_id,
+        "INSERT INTO identity_keys (device_id, public_key, registration_id) VALUES ($1, $2, $3)",
+        device_id,
         identity_key_bytes,
         req.registration_id,
     )
@@ -110,8 +116,8 @@ pub async fn register(
     .map_err(|_| server_error())?;
 
     sqlx::query!(
-        "INSERT INTO signed_prekeys (account_id, key_id, public_key, signature) VALUES ($1, $2, $3, $4)",
-        account_id,
+        "INSERT INTO signed_prekeys (device_id, key_id, public_key, signature) VALUES ($1, $2, $3, $4)",
+        device_id,
         req.signed_prekey.key_id,
         signed_prekey_bytes,
         signature_bytes,
@@ -121,8 +127,8 @@ pub async fn register(
     .map_err(|_| server_error())?;
 
     sqlx::query!(
-        "INSERT INTO kyber_signed_prekeys (account_id, key_id, public_key, signature) VALUES ($1, $2, $3, $4)",
-        account_id,
+        "INSERT INTO kyber_signed_prekeys (device_id, key_id, public_key, signature) VALUES ($1, $2, $3, $4)",
+        device_id,
         req.kyber_signed_prekey.key_id,
         kyber_public_key_bytes,
         kyber_signature_bytes,
@@ -133,8 +139,8 @@ pub async fn register(
 
     for (key_id, public_key) in &one_time_prekeys {
         sqlx::query!(
-            "INSERT INTO prekeys (account_id, key_id, public_key) VALUES ($1, $2, $3)",
-            account_id,
+            "INSERT INTO prekeys (device_id, key_id, public_key) VALUES ($1, $2, $3)",
+            device_id,
             key_id,
             public_key,
         )
@@ -145,5 +151,5 @@ pub async fn register(
 
     tx.commit().await.map_err(|_| server_error())?;
 
-    Ok((StatusCode::CREATED, Json(RegisterResponse { account_id })))
+    Ok((StatusCode::CREATED, Json(RegisterResponse { account_id, device_id })))
 }

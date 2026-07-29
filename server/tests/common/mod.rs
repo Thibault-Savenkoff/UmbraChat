@@ -43,6 +43,7 @@ pub fn sign(identity: &IdentityKeyPair, method: &str, path: &str, body: &[u8]) -
 
 pub struct TestAccount {
     pub account_id: Uuid,
+    pub device_id: Uuid,
     pub identity: IdentityKeyPair,
 }
 
@@ -83,7 +84,8 @@ pub async fn register_account(app: &axum::Router) -> TestAccount {
     assert_eq!(status, axum::http::StatusCode::CREATED, "test account registration must succeed");
 
     let account_id: Uuid = response["account_id"].as_str().unwrap().parse().unwrap();
-    TestAccount { account_id, identity }
+    let device_id: Uuid = response["device_id"].as_str().unwrap().parse().unwrap();
+    TestAccount { account_id, device_id, identity }
 }
 
 pub async fn cleanup_account(pool: &sqlx::PgPool, account_id: Uuid) {

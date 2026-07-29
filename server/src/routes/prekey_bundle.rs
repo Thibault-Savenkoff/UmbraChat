@@ -7,7 +7,7 @@ use serde::Serialize;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::auth::AuthenticatedAccount;
+use crate::auth::AuthenticatedDevice;
 use crate::error::{not_found, server_error, ApiError};
 
 #[derive(Serialize)]
@@ -36,46 +36,37 @@ pub struct PrekeyBundleResponse {
 
 pub async fn get_prekey_bundle(
     State(pool): State<PgPool>,
-    AuthenticatedAccount(_caller): AuthenticatedAccount,
-    Path(account_id): Path<Uuid>,
+    AuthenticatedDevice(_caller): AuthenticatedDevice,
+    Path(device_id): Path<Uuid>,
 ) -> Result<Json<PrekeyBundleResponse>, ApiError> {
-    let identity = sqlx::query!(
-        "SELECT public_key, registration_id FROM identity_keys WHERE account_id = $1",
-        account_id
-    )
-    .fetch_optional(&pool)
-    .await
-    .map_err(|_| server_error())?
-    .ok_or_else(|| not_found("account not found"))?;
+    let identity = sqlx::query!("SELECT public_key, registration_id FROM identity_keys WHERE device_id = $1", device_id)
+        .fetch_optional(&pool)
+        .await
+        .map_err(|_| server_error())?
+        .ok_or_else(|| not_found("device not found"))?;
 
-    let signed_prekey = sqlx::query!(
-        "SELECT key_id, public_key, signature FROM signed_prekeys WHERE account_id = $1",
-        account_id
-    )
-    .fetch_optional(&pool)
-    .await
-    .map_err(|_| server_error())?
-    .ok_or_else(|| not_found("account has no signed prekey"))?;
+    let signed_prekey = sqlx::query!("SELECT key_id, public_key, signature FROM signed_prekeys WHERE device_id = $1", device_id)
+        .fetch_optional(&pool)
+        .await
+        .map_err(|_| server_error())?
+        .ok_or_else(|| not_found("device has no signed prekey"))?;
 
-    let kyber_signed_prekey = sqlx::query!(
-        "SELECT key_id, public_key, signature FROM kyber_signed_prekeys WHERE account_id = $1",
-        account_id
-    )
-    .fetch_optional(&pool)
-    .await
-    .map_err(|_| server_error())?
-    .ok_or_else(|| not_found("account has no kyber signed prekey"))?;
+    let kyber_signed_prekey = sqlx::query!("SELECT key_id, public_key, signature FROM kyber_signed_prekeys WHERE device_id = $1", device_id)
+        .fetch_optional(&pool)
+        .await
+        .map_err(|_| server_error())?
+        .ok_or_else(|| not_found("device has no kyber signed prekey"))?;
 
     let one_time_prekey = sqlx::query!(
         r#"
         UPDATE prekeys
         SET used = true
-        WHERE account_id = $1 AND key_id = (
-            SELECT key_id FROM prekeys WHERE account_id = $1 AND used = false ORDER BY key_id LIMIT 1 FOR UPDATE SKIP LOCKED
+        WHERE device_id = $1 AND key_id = (
+            SELECT key_id FROM prekeys WHERE device_id = $1 AND used = false ORDER BY key_id LIMIT 1 FOR UPDATE SKIP LOCKED
         )
         RETURNING key_id, public_key
         "#,
-        account_id
+        device_id
     )
     .fetch_optional(&pool)
     .await

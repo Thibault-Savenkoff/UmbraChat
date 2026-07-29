@@ -20,7 +20,7 @@ pub fn router(pool: PgPool) -> Router {
 
     Router::new()
         .route("/v1/register", post(register::register))
-        .route("/v1/accounts/{id}/prekey-bundle", get(prekey_bundle::get_prekey_bundle))
+        .route("/v1/devices/{id}/prekey-bundle", get(prekey_bundle::get_prekey_bundle))
         .route("/v1/messages", post(messages::send_message).get(messages::fetch_messages))
         .layer(cors)
         .with_state(pool)
