@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Destruct envelope, timed expiry, open-triggered deletion
