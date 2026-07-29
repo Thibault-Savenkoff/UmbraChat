@@ -87,6 +87,10 @@ await alice.page.waitForFunction(
 );
 check("the sender's copy shows status 'opened'", true);
 
+// --- destruct mode resets after each send, doesn't silently carry over ---
+const modeAfterSend = await alice.page.inputValue('[data-testid="file-destruct-mode"]');
+check("the destruct-mode picker resets to 'None' after sending, not a standing policy", modeAfterSend === "none", modeAfterSend);
+
 // --- timed ---
 await sendFile(alice.page, "timed.bin", 256, "30");
 await bob.page.waitForFunction(() => document.querySelectorAll('[data-testid="file-message"]').length === 2, { timeout: 15000 });

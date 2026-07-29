@@ -109,6 +109,9 @@ export function Conversation({
       return;
     }
     onSendFile(file, destructFromOption(destructMode));
+    // Per-file opt-in, not a standing policy like the disappearing-message
+    // timer - reset so the next file doesn't silently inherit this one's mode.
+    setDestructMode("none");
   }
 
   return (
