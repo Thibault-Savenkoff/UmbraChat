@@ -12,11 +12,12 @@ export interface ChatMessage {
   id: string;
   direction: "sent" | "received";
   text: string;
-  status: "sent" | "delivered" | "read";
+  status: "sent" | "delivered" | "read" | "opened";
   createdAt: string;
   file?: ChatFile;
   timerSeconds?: number;
   expiresAt?: string;
+  destructOnOpen?: boolean;
 }
 
 function openDb(): Promise<IDBDatabase> {
