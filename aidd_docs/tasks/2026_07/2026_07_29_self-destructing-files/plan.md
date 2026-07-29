@@ -1,6 +1,6 @@
 ---
 objective: "A sender can mark a sent file to delete itself on the recipient's device either after being opened or after a time limit, and can see whether it was opened."
-status: pending
+status: implemented
 ---
 
 # Plan: Self-destructing files
