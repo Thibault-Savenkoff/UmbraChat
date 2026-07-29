@@ -4,7 +4,10 @@ const STORE_NAME = "groups";
 export interface Group {
   id: string;
   name: string;
-  /** Other members - excludes the local account, same convention `contactId` already uses for 1:1. */
+  /** The FULL membership, including the local account - deliberately not
+   * member-relative, since the same envelope value is stored as-is by every
+   * recipient (see chat/group.ts). Callers filter themselves out at fan-out
+   * time, never in what's stored. */
   memberAccountIds: string[];
   createdAt: string;
 }
