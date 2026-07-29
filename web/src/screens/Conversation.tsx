@@ -117,6 +117,9 @@ export function Conversation({
   return (
     <main>
       <h1>Conversation</h1>
+      <p role="note" data-testid="screenshot-disclosure">
+        ⚠ Screenshots can't be detected on web - assume anything shown here can be captured.
+      </p>
       <button onClick={() => onStartCall("voice")} disabled={callActive} aria-label="Voice call">
         📞
       </button>
