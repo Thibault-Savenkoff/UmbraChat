@@ -16,7 +16,7 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
  * Signs method+path+timestamp+body-hash with the local identity private key,
  * the same shape the server's auth extractor verifies (see server/src/auth.rs).
  */
-export async function signedFetch(path: string, method: "GET" | "POST", account: LocalAccount, body?: unknown): Promise<Response> {
+export async function signedFetch(path: string, method: "GET" | "POST" | "DELETE", account: LocalAccount, body?: unknown): Promise<Response> {
   const bodyText = body ? JSON.stringify(body) : "";
   const bodyHash = await sha256Hex(new TextEncoder().encode(bodyText));
   const timestamp = Math.floor(Date.now() / 1000).toString();
@@ -27,7 +27,7 @@ export async function signedFetch(path: string, method: "GET" | "POST", account:
     method,
     headers: {
       "content-type": "application/json",
-      "x-account-id": account.accountId,
+      "x-device-id": account.deviceId,
       "x-timestamp": timestamp,
       "x-signature": toBase64(signature),
     },

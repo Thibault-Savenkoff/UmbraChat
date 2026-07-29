@@ -17,19 +17,23 @@ export interface ContactBundle {
   one_time_prekey?: { key_id: number; public_key: number[] };
 }
 
-/** Rebuilds the store from the local identity, restoring `contactId`'s session if one was persisted. */
-export async function openStore(identity: IdentityBundle, contactId?: string): Promise<SignalStore> {
+/** Rebuilds the store from the local identity. Sessions are restored lazily per
+ * device key via `restoreSession`, not eagerly here - which devices exist for a
+ * contact isn't known until their device list is fetched. */
+export async function openStore(identity: IdentityBundle): Promise<SignalStore> {
   await ensureInit();
-  const store = new SignalStore(identity);
-  if (contactId) {
-    const session = await loadSession(contactId);
-    if (session) store.import_session(contactId, session);
-  }
-  return store;
+  return new SignalStore(identity);
 }
 
-/** Persists `contactId`'s current session state - call after establish_session/encrypt/decrypt. */
-export async function persistSession(store: SignalStore, contactId: string): Promise<void> {
-  const bytes = store.export_session(contactId);
-  if (bytes) await saveSession(contactId, bytes);
+/** Persists `key`'s current session state - call after establish_session/encrypt/decrypt. */
+export async function persistSession(store: SignalStore, key: string): Promise<void> {
+  const bytes = store.export_session(key);
+  if (bytes) await saveSession(key, bytes);
+}
+
+/** Restores a previously persisted session for `key` into the store, if one exists and isn't already loaded. */
+export async function restoreSession(store: SignalStore, key: string): Promise<void> {
+  if (store.has_session(key)) return;
+  const session = await loadSession(key);
+  if (session) store.import_session(key, session);
 }

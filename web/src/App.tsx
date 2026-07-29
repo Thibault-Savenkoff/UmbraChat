@@ -93,8 +93,8 @@ function App() {
     setError(undefined);
     try {
       const identity = await generateIdentity();
-      const accountId = await registerAccount(identity);
-      const account: LocalAccount = { accountId, identity };
+      const { accountId, deviceId } = await registerAccount(identity);
+      const account: LocalAccount = { accountId, deviceId, identity };
       await saveAccount(account);
       const safetyNumber = await computeSafetyNumber(identity.identity_public_key);
       setState({ status: "identity-ready", account, safetyNumber });

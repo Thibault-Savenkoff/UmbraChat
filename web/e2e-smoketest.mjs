@@ -47,7 +47,8 @@ checks.push(["exactly one new identity_keys row was created", countAfter === cou
 const { rows: newRows } = await db.query(
   `SELECT ik.public_key, ik.registration_id
    FROM identity_keys ik
-   JOIN accounts a ON a.id = ik.account_id
+   JOIN devices d ON d.id = ik.device_id
+   JOIN accounts a ON a.id = d.account_id
    ORDER BY a.created_at DESC
    LIMIT 1`,
 );
