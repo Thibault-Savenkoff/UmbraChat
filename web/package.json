@@ -16,7 +16,8 @@
     "e2e:voice-video-calls": "node e2e-voice-video-calls.mjs",
     "e2e:screenshot-detection": "node e2e-screenshot-detection.mjs",
     "e2e:self-destructing-files": "node e2e-self-destructing-files.mjs",
-    "e2e:multi-device-sync": "node e2e-multi-device-sync.mjs"
+    "e2e:multi-device-sync": "node e2e-multi-device-sync.mjs",
+    "e2e:group-messaging": "node e2e-group-messaging.mjs"
   },
   "dependencies": {
     "react": "^19.2.7",

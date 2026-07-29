@@ -18,6 +18,9 @@ export interface ChatMessage {
   timerSeconds?: number;
   expiresAt?: string;
   destructOnOpen?: boolean;
+  /** Only set on received group messages - which member sent it. A 1:1
+   * conversation's sender is already implicit from the open contact. */
+  senderAccountId?: string;
 }
 
 function openDb(): Promise<IDBDatabase> {

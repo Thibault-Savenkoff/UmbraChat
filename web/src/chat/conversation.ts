@@ -69,7 +69,33 @@ function isCallEnvelope(envelope: Envelope): envelope is CallEnvelope {
   return envelope.type === "call-offer" || envelope.type === "call-answer" || envelope.type === "call-ice" || envelope.type === "call-end";
 }
 
-type Envelope = TextEnvelope | FileEnvelope | ReceiptEnvelope | FileOpenedEnvelope | TimerEnvelope | CallEnvelope;
+export interface GroupInviteEnvelope {
+  type: "group-invite";
+  groupId: string;
+  name: string;
+  memberAccountIds: string[];
+}
+
+export interface GroupUpdateEnvelope {
+  type: "group-update";
+  groupId: string;
+  memberAccountIds: string[];
+}
+
+export interface GroupTextEnvelope {
+  type: "group-text";
+  groupId: string;
+  id: string;
+  body: string;
+}
+
+export type GroupEnvelope = GroupInviteEnvelope | GroupUpdateEnvelope | GroupTextEnvelope;
+
+export function isGroupEnvelope(envelope: Envelope): envelope is GroupEnvelope {
+  return envelope.type === "group-invite" || envelope.type === "group-update" || envelope.type === "group-text";
+}
+
+type Envelope = TextEnvelope | FileEnvelope | ReceiptEnvelope | FileOpenedEnvelope | TimerEnvelope | CallEnvelope | GroupEnvelope;
 
 /** The composite session address a contact's specific device is addressed by.
  * `wasm-crypto` treats this as an opaque string name (its own device_id field
@@ -87,7 +113,7 @@ function sessionKey(contactAccountId: string, deviceId: string): string {
  * list on every call rather than caching it, so a contact's newly linked
  * device is included in the very next send with no extra wiring.
  */
-async function sendToContact(contactId: string, plaintext: Uint8Array, account: LocalAccount, store: SignalStore): Promise<void> {
+export async function sendToContact(contactId: string, plaintext: Uint8Array, account: LocalAccount, store: SignalStore): Promise<void> {
   const devices = await listDevices(contactId, account);
   // list_devices returns an empty array rather than 404ing for an unknown
   // account (see server/src/routes/devices.rs), so an empty list here would
@@ -235,29 +261,46 @@ export async function markFileOpened(contactId: string, messageId: string, accou
  * status tracking turns out to matter.
  */
 export async function poll(
-  contactId: string,
+  contactId: string | undefined,
   account: LocalAccount,
   store: SignalStore,
   onCallSignal?: (envelope: CallEnvelope) => Promise<void>,
+  onGroupSignal?: (envelope: GroupEnvelope, senderAccountId: string) => Promise<void>,
 ): Promise<ChatMessage[]> {
   const received = await fetchMessages(account);
-  const messages = await loadMessages(contactId);
+  const messages = contactId ? await loadMessages(contactId) : [];
 
   for (const message of received) {
-    if (message.senderAccountId !== contactId) {
+    // Every message is decrypted regardless of sender, *before* deciding
+    // whether it's for the open 1:1 conversation - a group message can arrive
+    // from any member, not just whichever contact happens to be open, so the
+    // old sender-must-match filter would silently drop it if checked first.
+    // Side effect, not the point: this also fixes a latent bug where a message
+    // from a non-open sender was never decrypted at all, permanently desyncing
+    // that sender's local ratchet from the one they hold.
+    const key = sessionKey(message.senderAccountId, message.senderDeviceId);
+    await restoreSession(store, key);
+    const plaintext = store.decrypt(key, message.envelope);
+    const envelope = JSON.parse(new TextDecoder().decode(plaintext)) as Envelope;
+
+    if (isGroupEnvelope(envelope)) {
+      await onGroupSignal?.(envelope, message.senderAccountId);
+      await persistSession(store, key);
+      continue;
+    }
+
+    if (!contactId || message.senderAccountId !== contactId) {
       // ponytail: GET /v1/messages is fetch-and-delete server-side, so a message
       // from anyone but the open conversation partner is gone the moment we see
       // it here - there's no per-contact fetch, and no multi-conversation UI yet
       // to route it to. Upgrade: server-side per-sender fetch, or a contacts
       // list that keeps every contact's poll loop alive, not just the open one.
+      // No contactId at all (a group-only poll) drops every non-group envelope
+      // the same way - there's no 1:1 conversation open to show it in.
       console.warn(`dropped a message from ${message.senderAccountId}: no open conversation for that sender`);
+      await persistSession(store, key);
       continue;
     }
-
-    const key = sessionKey(message.senderAccountId, message.senderDeviceId);
-    await restoreSession(store, key);
-    const plaintext = store.decrypt(key, message.envelope);
-    const envelope = JSON.parse(new TextDecoder().decode(plaintext)) as Envelope;
 
     if (isCallEnvelope(envelope)) {
       await onCallSignal?.(envelope);
@@ -310,6 +353,6 @@ export async function poll(
   const now = Date.now();
   const alive = messages.filter((m) => !m.expiresAt || new Date(m.expiresAt).getTime() > now);
 
-  if (received.length > 0 || alive.length !== messages.length) await saveMessages(contactId, alive);
+  if (contactId && (received.length > 0 || alive.length !== messages.length)) await saveMessages(contactId, alive);
   return alive;
 }
