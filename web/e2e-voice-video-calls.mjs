@@ -111,6 +111,16 @@ check("a declined call shows 'Declined' to the caller", declineReason === "Decli
 await alice.page.waitForTimeout(3500);
 await bob.page.waitForTimeout(500);
 
+// --- caller cancels before the callee answers ---
+await alice.page.click('[aria-label="Voice call"]');
+await bob.page.waitForSelector('[data-testid="incoming-call-banner"]', { timeout: 15000 });
+await alice.page.click("text=Hang Up");
+await alice.page.waitForSelector('[data-testid="call-ended"]', { timeout: 15000 });
+const cancelReason = await alice.page.textContent('[data-testid="call-end-reason"]');
+check("cancelling an outgoing ring before it's answered shows 'Call cancelled', not 'Call ended'", cancelReason === "Call cancelled", cancelReason);
+await alice.page.waitForTimeout(3500);
+await bob.page.waitForTimeout(500);
+
 // --- unreachable: no answer within the timeout ---
 await alice.page.click('[aria-label="Voice call"]');
 await alice.page.waitForSelector('[data-testid="call-end-reason"]', { timeout: 40000 });
