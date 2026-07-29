@@ -1,6 +1,6 @@
 ---
 objective: "The web client honestly discloses that it cannot detect screenshots, rather than silently doing nothing or implying protection it can't provide."
-status: pending
+status: implemented
 ---
 
 # Plan: Screenshot detection
