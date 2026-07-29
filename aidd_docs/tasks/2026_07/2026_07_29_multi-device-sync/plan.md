@@ -1,6 +1,6 @@
 ---
 objective: "A user can link additional devices to their account (each with its own identity and sessions, no private key ever touching the server), send/receive under that identity, see their linked devices, and unlink one to immediately cut off its access."
-status: pending
+status: implemented
 ---
 
 # Plan: Multi-device sync
