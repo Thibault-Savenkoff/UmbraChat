@@ -29,6 +29,12 @@ function App() {
   const [callState, setCallState] = useState<CallState>(getCallState());
   const [error, setError] = useState<string>();
   const pollTimer = useRef<number>(undefined);
+  // Debug-only, for the phase-1/2 scaffold: "ended" carries no stream field, so
+  // this keeps the last known local stream visible to confirm hangUp actually
+  // stopped its tracks (readyState reads live off the real MediaStream each
+  // render, not a snapshot). Gone once phase 3 removes the scaffold.
+  const lastLocalStreamRef = useRef<MediaStream | null>(null);
+  if ("localStream" in callState) lastLocalStreamRef.current = callState.localStream;
 
   useEffect(() => subscribeToCallState(setCallState), []);
 
@@ -144,13 +150,27 @@ function App() {
 
   const { contactId, account, store } = state;
 
+  // MediaStream doesn't serialize usefully via JSON.stringify (no enumerable own
+  // properties) - summarize the track kinds/readyState instead, for the debug
+  // readout below. Scaffold-only; gone once phase 3 replaces this with real
+  // <video>/<audio> elements bound to the streams directly.
+  function summarizeStream(stream: MediaStream | null | undefined) {
+    return stream?.getTracks().map((t) => ({ kind: t.kind, readyState: t.readyState })) ?? null;
+  }
+  const callStateSummary = {
+    ...callState,
+    ...("localStream" in callState ? { localStream: summarizeStream(callState.localStream) } : {}),
+    ...("remoteStream" in callState ? { remoteStream: summarizeStream(callState.remoteStream) } : {}),
+    lastLocalTracks: summarizeStream(lastLocalStreamRef.current),
+  };
+
   return (
     <>
       {/* ponytail: bare phase-1 scaffold - real signaling wiring needs something to
           trigger it end-to-end. Replaced by the polished banner/active-call screen
           in phase 3. */}
       <div data-testid="call-scaffold">
-        <pre data-testid="call-state">{JSON.stringify(callState)}</pre>
+        <pre data-testid="call-state">{JSON.stringify(callStateSummary)}</pre>
         {(callState.status === "idle" || callState.status === "ended") && (
           <>
             <button onClick={() => void startCall(contactId, "voice", account, store)}>Call</button>
