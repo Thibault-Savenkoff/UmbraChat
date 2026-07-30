@@ -1,8 +1,11 @@
 import type { IdentityBundle } from "../crypto/identity";
 import { identityBundleToJson } from "./codec";
 
-// ponytail: hardcoded dev API base, add env-based config when there's a real deploy target.
-export const API_BASE = "http://localhost:3000";
+// Same-origin by default - Vite's dev proxy (see vite.config.ts) forwards
+// /v1 to the Rust server, which keeps this working over HTTPS without
+// mixed-content blocking (matches api/signedRequest.ts). VITE_API_BASE
+// overrides it for a real deploy where the API isn't co-located.
+export const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
 export interface RegisteredAccount {
   accountId: string;
