@@ -1,5 +1,5 @@
 ---
-status: pending
+status: blocked
 ---
 
 # Instruction: WebAuthn/biometric unlock (stretch)
@@ -18,7 +18,13 @@ status: pending
     │   └── Unlock.tsx ✏️ offer a biometric prompt button when this device registered one
 ```
 
-## Tasks to do
+## Feasibility check result (2026-07-30)
+
+Ran `PublicKeyCredential.getClientCapabilities()` against the dev Chromium: `PublicKeyCredential` exists, `getClientCapabilities` exists, and `extension:prf` reports `true` - the client-side API surface needed is present in a modern evergreen browser. But `userVerifyingPlatformAuthenticator` and `isUserVerifyingPlatformAuthenticatorAvailable()` both report `false` in this headless Linux dev environment, because there's no real Face ID/Touch ID/fingerprint hardware here to register a credential against - completing an actual registration ceremony isn't possible from this machine at all, and there's no way to drive the user's real iPhone from here either.
+
+**Blocked per this project's own `blocked.md` criteria: "human login (Google OAuth, Apple Face/Touch ID)" is an explicitly named condition only a human can unblock** - this needs to be verified live on the user's own device, not guessed at or shipped blind. Filed as a separate follow-up issue rather than blocking the rest of this plan, since phases 1-3 already deliver the plan's full stated objective (WebAuthn was always an alternative, never a requirement).
+
+## Tasks to do (deferred to the follow-up issue)
 
 ### `1)` Feasibility check - do this before writing any implementation
 

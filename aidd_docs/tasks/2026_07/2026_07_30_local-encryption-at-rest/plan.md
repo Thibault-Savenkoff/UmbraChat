@@ -1,6 +1,6 @@
 ---
 objective: "A user can opt in, from a new Settings screen, to encrypting everything stored locally (identity/session keys, message history, group metadata) behind a passphrase they set - unlocked once per app open, off by default."
-status: in-progress
+status: implemented
 ---
 
 # Plan: Optional local storage encryption at rest
@@ -19,7 +19,7 @@ status: in-progress
 | 1   | Vault primitive + storage wiring         | [`phase-1.md`](./phase-1.md)  |
 | 2   | Settings screen + enable/disable flow    | [`phase-2.md`](./phase-2.md)  |
 | 3   | Unlock screen at boot                    | [`phase-3.md`](./phase-3.md)  |
-| 4   | WebAuthn/biometric unlock (stretch)      | [`phase-4.md`](./phase-4.md)  |
+| 4   | WebAuthn/biometric unlock (stretch)      | [`phase-4.md`](./phase-4.md) - blocked, deferred to [issue #29](https://github.com/Thibault-Savenkoff/UmbraChat/issues/29) |
 
 ## Decisions
 
