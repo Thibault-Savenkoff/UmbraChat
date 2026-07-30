@@ -1,11 +1,13 @@
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{extract::State, http::StatusCode, Extension, Json};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::auth::{Authenticated, AuthenticatedDevice};
 use crate::error::{bad_request, server_error, ApiError};
+use crate::routes::push::notify_device;
 
 #[derive(Deserialize)]
 pub struct SendMessageRequest {
@@ -20,6 +22,7 @@ pub struct SendMessageResponse {
 
 pub async fn send_message(
     State(pool): State<PgPool>,
+    Extension(vapid_private_key): Extension<Arc<String>>,
     Authenticated { device_id: sender_device_id, body }: Authenticated<SendMessageRequest>,
 ) -> Result<(StatusCode, Json<SendMessageResponse>), ApiError> {
     let ciphertext = STANDARD.decode(&body.ciphertext).map_err(|_| bad_request("ciphertext is not valid base64"))?;
@@ -40,6 +43,10 @@ pub async fn send_message(
     .fetch_one(&pool)
     .await
     .map_err(|_| server_error())?;
+
+    // Best-effort, never blocks or fails the send itself - see notify_device's
+    // own doc comment for why.
+    notify_device(&pool, &vapid_private_key, body.recipient_device_id).await;
 
     Ok((StatusCode::CREATED, Json(SendMessageResponse { id })))
 }

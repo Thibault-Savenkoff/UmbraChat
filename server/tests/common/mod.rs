@@ -9,9 +9,15 @@ use tower::ServiceExt;
 use umbrachat_server::{db, routes};
 use uuid::Uuid;
 
+// A real, syntactically valid VAPID key so any test that does exercise a
+// push send (via a registered subscription) doesn't fail on key parsing -
+// its actual value doesn't matter since no test push service is contacted
+// during this run.
+pub const TEST_VAPID_PRIVATE_KEY: &str = "4rISdCDvPIdiTUpJbPqHt2gi3TCVqEq0sCnqi9iykXQ";
+
 pub async fn app() -> axum::Router {
     let pool = db::connect().await;
-    routes::router(pool)
+    routes::router(pool, TEST_VAPID_PRIVATE_KEY.to_string())
 }
 
 pub async fn request(app: &axum::Router, method: &str, path: &str, headers: &[(&str, &str)], body: Value) -> (axum::http::StatusCode, Value) {

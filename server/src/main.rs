@@ -3,7 +3,8 @@ use umbrachat_server::{db, routes};
 #[tokio::main]
 async fn main() {
     let pool = db::connect().await;
-    let app = routes::router(pool);
+    let vapid_private_key = std::env::var("VAPID_PRIVATE_KEY").expect("VAPID_PRIVATE_KEY must be set");
+    let app = routes::router(pool, vapid_private_key);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
         .await
