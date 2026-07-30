@@ -19,8 +19,9 @@ function isEncryptedBlob(value: unknown): value is EncryptedBlob {
 
 /** Recursively replaces every Uint8Array with a base64 marker, so the result
  * is JSON-serializable - IndexedDB stores structured objects directly, but
- * once we're encrypting we need one flat plaintext buffer to hand to AES-GCM. */
-function replaceBytes(value: unknown): unknown {
+ * once we're encrypting we need one flat plaintext buffer to hand to AES-GCM.
+ * Exported for crypto/backup.ts, which needs the exact same walk. */
+export function replaceBytes(value: unknown): unknown {
   if (value instanceof Uint8Array) return { __bytes: toBase64(value) };
   if (Array.isArray(value)) return value.map(replaceBytes);
   if (value && typeof value === "object") {
@@ -31,7 +32,7 @@ function replaceBytes(value: unknown): unknown {
   return value;
 }
 
-function restoreBytes(value: unknown): unknown {
+export function restoreBytes(value: unknown): unknown {
   if (value && typeof value === "object" && "__bytes" in value) return fromBase64((value as { __bytes: string }).__bytes);
   if (Array.isArray(value)) return value.map(restoreBytes);
   if (value && typeof value === "object") {
@@ -56,7 +57,10 @@ export function isEncryptionEnabled(): boolean {
   return localStorage.getItem(ENABLED_KEY) === "1";
 }
 
-async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKey> {
+/** Exported for crypto/backup.ts, which needs the exact same PBKDF2 shape for
+ * its own (independent) passphrase - see the plan's Decisions for why a
+ * backup's passphrase is never the same key as the local-encryption one. */
+export async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKey> {
   const baseKey = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
   return crypto.subtle.deriveKey(
     { name: "PBKDF2", salt: salt as BufferSource, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },

@@ -1,11 +1,21 @@
 import { useState } from "react";
 import { isEncryptionEnabled, enableEncryption, disableEncryption } from "../crypto/vault";
+import { exportBackup } from "../crypto/backup";
 
 interface SettingsProps {
   onBack: () => void;
 }
 
 const MIN_PASSPHRASE_LENGTH = 8;
+
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export function Settings({ onBack }: SettingsProps) {
   const [enabled, setEnabled] = useState(isEncryptionEnabled());
@@ -14,6 +24,12 @@ export function Settings({ onBack }: SettingsProps) {
   const [confirm, setConfirm] = useState("");
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string>();
+
+  // Deliberately separate from the encryption passphrase above - a backup's
+  // passphrase is never the same key (see the plan's Decisions).
+  const [backupPassphrase, setBackupPassphrase] = useState("");
+  const [backupWorking, setBackupWorking] = useState(false);
+  const [backupError, setBackupError] = useState<string>();
 
   const canSubmit = passphrase.length >= MIN_PASSPHRASE_LENGTH && passphrase === confirm;
 
@@ -43,6 +59,20 @@ export function Settings({ onBack }: SettingsProps) {
       setError(err instanceof Error ? err.message : "failed to disable encryption");
     } finally {
       setWorking(false);
+    }
+  }
+
+  async function handleExportBackup() {
+    setBackupWorking(true);
+    setBackupError(undefined);
+    try {
+      const blob = await exportBackup(backupPassphrase);
+      downloadBlob(blob, `umbrachat-backup-${new Date().toISOString().slice(0, 10)}.json`);
+      setBackupPassphrase("");
+    } catch (err) {
+      setBackupError(err instanceof Error ? err.message : "failed to export backup");
+    } finally {
+      setBackupWorking(false);
     }
   }
 
@@ -96,6 +126,24 @@ export function Settings({ onBack }: SettingsProps) {
           </div>
         )}
         {error && <p role="alert">{error}</p>}
+      </section>
+
+      <section className="panel stack">
+        <h2>Backup</h2>
+        <input
+          type="password"
+          placeholder="Passphrase"
+          value={backupPassphrase}
+          onChange={(e) => setBackupPassphrase(e.target.value)}
+          disabled={backupWorking}
+        />
+        <button onClick={handleExportBackup} disabled={!backupPassphrase || backupWorking}>
+          {backupWorking ? "Exporting..." : "Export Backup"}
+        </button>
+        <p className="hint">
+          Saves an encrypted file you keep yourself. Forgetting this passphrase means the backup can't be restored.
+        </p>
+        {backupError && <p role="alert">{backupError}</p>}
       </section>
     </main>
   );
