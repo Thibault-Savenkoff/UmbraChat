@@ -4,6 +4,7 @@ import { openStore, persistSession, restoreSession } from "../crypto/session";
 import { fetchPrekeyBundle } from "../api/prekeyBundle";
 import { sendMessage, fetchMessages } from "../api/messages";
 import { listDevices } from "../api/devices";
+import { toBase64, fromBase64 } from "../api/codec";
 import { loadMessages, saveMessages, type ChatMessage } from "../storage/messageStore";
 
 interface TextEnvelope {
@@ -18,7 +19,15 @@ interface FileEnvelope {
   filename: string;
   mimeType: string;
   size: number;
-  data: number[];
+  // base64, not a JSON array of numbers - a plain number[] blows up to ~3.5x
+  // the raw size once JSON-stringified (each byte becomes 1-3 ASCII digits
+  // plus a comma), on top of the outer request's own base64 layer. That
+  // compounded a file well under MAX_FILE_BYTES into a wire payload that
+  // could exceed the server's body limit, with the client stuck waiting on
+  // an upload that could never finish - this is what "stuck in sending"
+  // actually was. base64 keeps the expansion to the ~1.33x the size budget
+  // (MAX_FILE_BYTES vs the server's MAX_BODY_BYTES) always assumed.
+  data: string;
   destructOnOpen?: boolean;
   timerSeconds?: number;
 }
@@ -145,6 +154,34 @@ export function isFileTooLarge(file: File): boolean {
   return file.size > MAX_FILE_BYTES;
 }
 
+/**
+ * Re-encodes any image that isn't already JPEG/WebP into WebP before it's
+ * sent - fixes two things at once: phone camera formats like HEIC render as
+ * a plain download link everywhere except Safari (no <img> support), and
+ * they're frequently bigger than MAX_FILE_BYTES, so shrinking here also
+ * means fewer "too large" rejections. Canvas + createImageBitmap are native,
+ * evergreen-browser APIs - no image library needed for a single re-encode.
+ */
+async function normalizeImage(file: File): Promise<File> {
+  if (!file.type.startsWith("image/") || file.type === "image/jpeg" || file.type === "image/webp") return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.drawImage(bitmap, 0, 0);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", 0.85));
+    if (!blob) return file;
+    return new File([blob], file.name.replace(/\.[^.]+$/, "") + ".webp", { type: "image/webp" });
+  } catch {
+    // Some inputs createImageBitmap can't decode at all - send the original
+    // rather than blocking the send outright.
+    return file;
+  }
+}
+
 function timerKey(contactId: string): string {
   return `umbrachat:timer:${contactId}`;
 }
@@ -200,14 +237,16 @@ export async function sendFile(
   destruct?: FileDestruct,
 ): Promise<ChatMessage[]> {
   onStage("encrypting");
-  const bytes = new Uint8Array(await file.arrayBuffer());
+  const normalized = await normalizeImage(file);
+  if (isFileTooLarge(normalized)) throw new Error(`${normalized.name} is too large (max 8MB) even after compression`);
+  const bytes = new Uint8Array(await normalized.arrayBuffer());
   const envelope: FileEnvelope = {
     type: "file",
     id: crypto.randomUUID(),
-    filename: file.name,
-    mimeType: file.type || "application/octet-stream",
-    size: file.size,
-    data: Array.from(bytes),
+    filename: normalized.name,
+    mimeType: normalized.type || "application/octet-stream",
+    size: normalized.size,
+    data: toBase64(bytes),
     ...(destruct && "onOpen" in destruct ? { destructOnOpen: true } : {}),
     ...(destruct && "afterSeconds" in destruct ? { timerSeconds: destruct.afterSeconds } : {}),
   };
@@ -252,13 +291,77 @@ export async function markFileOpened(contactId: string, messageId: string, accou
 }
 
 /**
+ * Sends "read" receipts for received messages in `contactId`'s local history
+ * that only have a "delivered" one so far - call this when the user actually
+ * opens that conversation, not the moment a message is buffered while it's
+ * still closed. Security fix: a message from a sender other than the open
+ * contact used to get both delivered *and* read sent back the instant the
+ * background poll decrypted it, regardless of whether anyone had looked at
+ * anything - that turned "read" into a presence oracle (a sender who only
+ * knows the target's account id could probe for exactly when their device is
+ * unlocked/foregrounded, with no accept step and no way to suppress it).
+ * "Delivered" alone is left automatic; it only confirms a client is polling
+ * at all, a much coarser signal already close to what device listing already
+ * exposes - "read" now means a person actually opened the conversation.
+ */
+export async function markConversationRead(contactId: string, account: LocalAccount, store: SignalStore): Promise<ChatMessage[]> {
+  const messages = await loadMessages(contactId);
+  let changed = false;
+  for (const m of messages) {
+    if (m.direction !== "received" || m.status !== "delivered") continue;
+    const receipt: ReceiptEnvelope = { type: "read", refId: m.id };
+    await sendToContact(contactId, new TextEncoder().encode(JSON.stringify(receipt)), account, store);
+    m.status = "read";
+    changed = true;
+  }
+  if (changed) await saveMessages(contactId, messages);
+  return messages;
+}
+
+function buildReceivedTextMessage(envelope: TextEnvelope, createdAt: string, timerSeconds: number): ChatMessage {
+  return {
+    id: envelope.id,
+    direction: "received",
+    text: envelope.body,
+    status: "delivered",
+    createdAt,
+    // Decrypting is already this app's "read" moment (see the receipt loop
+    // wherever this is called from), so the expiry clock starts now.
+    ...(timerSeconds > 0 ? { expiresAt: new Date(Date.now() + timerSeconds * 1000).toISOString() } : {}),
+  };
+}
+
+function buildReceivedFileMessage(envelope: FileEnvelope, createdAt: string): ChatMessage {
+  return {
+    id: envelope.id,
+    direction: "received",
+    text: "",
+    status: "delivered",
+    createdAt,
+    file: { filename: envelope.filename, mimeType: envelope.mimeType, size: envelope.size, bytes: fromBase64(envelope.data) },
+    ...(envelope.destructOnOpen ? { destructOnOpen: true } : {}),
+    ...(envelope.timerSeconds ? { expiresAt: new Date(Date.now() + envelope.timerSeconds * 1000).toISOString() } : {}),
+  };
+}
+
+/**
  * Fetches and decrypts any pending messages, updates local history, and
- * replies with receipts. ponytail: delivered and read are sent together as
- * soon as a text message is decrypted, since polling only happens while the
- * conversation screen is open - there's no background-delivery state yet to
- * tell the two apart. Split them once there's a reason to. Files don't get
- * delivered/read receipts at all yet - only text does; add them if file
- * status tracking turns out to matter.
+ * replies with receipts. A text/file message from a sender other than the
+ * currently open contact - including a first-ever message from someone new -
+ * is still saved into that sender's own local history and reported via
+ * `onIncomingChat`, rather than dropped: `GET /v1/messages` is fetch-and-
+ * delete server-side, so this is the only chance to keep it. Everything else
+ * (call signals, timers, receipts) only makes sense inside an already-open
+ * conversation with that sender and is dropped if it's not open.
+ *
+ * Receipts: for the currently open contact, delivered and read fire together
+ * as soon as a text message is decrypted, since the user is actively looking
+ * at that conversation right now. For anyone else, only "delivered" fires
+ * here - "read" is deferred to `markConversationRead`, called once the user
+ * actually opens that conversation (see its doc comment for why: sending
+ * "read" automatically for an unopened sender was a presence oracle). Files
+ * don't get delivered/read receipts at all yet - only text does; add them if
+ * file status tracking turns out to matter.
  */
 export async function poll(
   contactId: string | undefined,
@@ -266,9 +369,17 @@ export async function poll(
   store: SignalStore,
   onCallSignal?: (envelope: CallEnvelope) => Promise<void>,
   onGroupSignal?: (envelope: GroupEnvelope, senderAccountId: string) => Promise<void>,
+  onIncomingChat?: (senderAccountId: string) => void,
 ): Promise<ChatMessage[]> {
   const received = await fetchMessages(account);
   const messages = contactId ? await loadMessages(contactId) : [];
+  // Local history for senders other than the open contact, loaded lazily
+  // since a single poll can surface messages from several new senders at once.
+  const otherSenderMessages = new Map<string, ChatMessage[]>();
+  async function bucketFor(senderId: string): Promise<ChatMessage[]> {
+    if (!otherSenderMessages.has(senderId)) otherSenderMessages.set(senderId, await loadMessages(senderId));
+    return otherSenderMessages.get(senderId)!;
+  }
 
   for (const message of received) {
     // Every message is decrypted regardless of sender, *before* deciding
@@ -290,14 +401,22 @@ export async function poll(
     }
 
     if (!contactId || message.senderAccountId !== contactId) {
-      // ponytail: GET /v1/messages is fetch-and-delete server-side, so a message
-      // from anyone but the open conversation partner is gone the moment we see
-      // it here - there's no per-contact fetch, and no multi-conversation UI yet
-      // to route it to. Upgrade: server-side per-sender fetch, or a contacts
-      // list that keeps every contact's poll loop alive, not just the open one.
-      // No contactId at all (a group-only poll) drops every non-group envelope
-      // the same way - there's no 1:1 conversation open to show it in.
-      console.warn(`dropped a message from ${message.senderAccountId}: no open conversation for that sender`);
+      if (envelope.type === "text") {
+        const bucket = await bucketFor(message.senderAccountId);
+        bucket.push(buildReceivedTextMessage(envelope, message.createdAt, getTimerSeconds(message.senderAccountId)));
+        // "delivered" only, not "read" - see markConversationRead's doc comment.
+        const receipt: ReceiptEnvelope = { type: "delivered", refId: envelope.id };
+        await sendToContact(message.senderAccountId, new TextEncoder().encode(JSON.stringify(receipt)), account, store);
+        onIncomingChat?.(message.senderAccountId);
+      } else if (envelope.type === "file") {
+        const bucket = await bucketFor(message.senderAccountId);
+        bucket.push(buildReceivedFileMessage(envelope, message.createdAt));
+        onIncomingChat?.(message.senderAccountId);
+      } else {
+        // Calls/timer/file-opened/receipts only make sense inside an already-
+        // open conversation with that sender - nothing to update if it's not.
+        console.warn(`dropped a ${envelope.type} envelope from ${message.senderAccountId}: no open conversation for that sender`);
+      }
       await persistSession(store, key);
       continue;
     }
@@ -305,33 +424,14 @@ export async function poll(
     if (isCallEnvelope(envelope)) {
       await onCallSignal?.(envelope);
     } else if (envelope.type === "text") {
-      const timerSeconds = getTimerSeconds(contactId);
-      messages.push({
-        id: envelope.id,
-        direction: "received",
-        text: envelope.body,
-        status: "delivered",
-        createdAt: message.createdAt,
-        // Receiving while the conversation is open is already this app's "read"
-        // moment (see the receipt loop below), so the expiry clock starts now.
-        ...(timerSeconds > 0 ? { expiresAt: new Date(Date.now() + timerSeconds * 1000).toISOString() } : {}),
-      });
+      messages.push(buildReceivedTextMessage(envelope, message.createdAt, getTimerSeconds(contactId)));
 
       for (const type of ["delivered", "read"] as const) {
         const receipt: ReceiptEnvelope = { type, refId: envelope.id };
         await sendToContact(contactId, new TextEncoder().encode(JSON.stringify(receipt)), account, store);
       }
     } else if (envelope.type === "file") {
-      messages.push({
-        id: envelope.id,
-        direction: "received",
-        text: "",
-        status: "delivered",
-        createdAt: message.createdAt,
-        file: { filename: envelope.filename, mimeType: envelope.mimeType, size: envelope.size, bytes: Uint8Array.from(envelope.data) },
-        ...(envelope.destructOnOpen ? { destructOnOpen: true } : {}),
-        ...(envelope.timerSeconds ? { expiresAt: new Date(Date.now() + envelope.timerSeconds * 1000).toISOString() } : {}),
-      });
+      messages.push(buildReceivedFileMessage(envelope, message.createdAt));
     } else if (envelope.type === "timer") {
       setTimerSecondsLocal(contactId, envelope.seconds);
     } else if (envelope.type === "file-opened") {
@@ -348,6 +448,10 @@ export async function poll(
     }
 
     await persistSession(store, key);
+  }
+
+  for (const [senderId, msgs] of otherSenderMessages) {
+    await saveMessages(senderId, msgs);
   }
 
   const now = Date.now();

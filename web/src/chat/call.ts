@@ -103,7 +103,19 @@ function newPeerConnection(contactId: string, callId: string, kind: CallKind, ac
 export async function startCall(contactId: string, kind: CallKind, account: LocalAccount, store: SignalStore): Promise<void> {
   cleanup();
   const callId = crypto.randomUUID();
-  const localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: kind === "video" });
+  let localStream: MediaStream;
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: kind === "video" });
+  } catch {
+    // No offer was ever sent, so the other side has nothing to be told about -
+    // just show "Call failed" locally instead of leaving the button looking
+    // like it did nothing (the previous behavior: every call site discarded
+    // this rejection with `void`, so a denied permission or an insecure
+    // context with no navigator.mediaDevices at all vanished silently).
+    setState({ status: "ended", reason: "failed" });
+    scheduleIdleReset();
+    return;
+  }
   pc = newPeerConnection(contactId, callId, kind, account, store);
   for (const track of localStream.getTracks()) pc.addTrack(track, localStream);
 
@@ -119,7 +131,17 @@ export async function acceptCall(contactId: string, account: LocalAccount, store
   if (state.status !== "incoming-ringing" || !pendingOffer) return;
   const { callId, kind, sdp } = pendingOffer;
 
-  const localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: kind === "video" });
+  let localStream: MediaStream;
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: kind === "video" });
+  } catch {
+    // The caller already has an offer out and is sitting there ringing - tell
+    // them it failed instead of letting them wait out the full answer timeout
+    // for a call the callee could never actually accept.
+    pendingOffer = null;
+    await endCall(contactId, "failed", callId, account, store);
+    return;
+  }
   pc = newPeerConnection(contactId, callId, kind, account, store);
   for (const track of localStream.getTracks()) pc.addTrack(track, localStream);
 
