@@ -1,14 +1,17 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ChatMessage } from "../storage/messageStore";
-import { isFileTooLarge, type FileDestruct, type FileSendStage } from "../chat/conversation";
+import { isFileTooLarge, subscribeToTypingState, resetTypingState, type FileDestruct, type FileSendStage } from "../chat/conversation";
+import { loadNickname, saveNickname } from "../storage/nicknameStore";
 
 interface ConversationProps {
+  contactId: string;
   messages: ChatMessage[];
   onSend: (text: string) => void;
   onSendFile: (file: File, destruct?: FileDestruct) => void;
   onOpenFile: (messageId: string) => void;
   onStartCall: (kind: "voice" | "video") => void;
   onSetTimer: (seconds: number) => void;
+  onTyping: () => void;
   onBack: () => void;
   sending: boolean;
   fileStage?: FileSendStage;
@@ -79,12 +82,14 @@ function FileMessage({ message, onOpenFile }: { message: ChatMessage; onOpenFile
 }
 
 export function Conversation({
+  contactId,
   messages,
   onSend,
   onSendFile,
   onOpenFile,
   onStartCall,
   onSetTimer,
+  onTyping,
   onBack,
   sending,
   fileStage,
@@ -95,6 +100,28 @@ export function Conversation({
   const [text, setText] = useState("");
   const [fileError, setFileError] = useState<string>();
   const [destructMode, setDestructMode] = useState("none");
+  const [nickname, setNickname] = useState<string>();
+  const [contactTyping, setContactTyping] = useState(false);
+
+  useEffect(() => {
+    loadNickname(contactId).then(setNickname);
+  }, [contactId]);
+
+  useEffect(() => {
+    setContactTyping(false);
+    const unsubscribe = subscribeToTypingState(setContactTyping);
+    return () => {
+      unsubscribe();
+      resetTypingState();
+    };
+  }, [contactId]);
+
+  async function handleEditNickname() {
+    const next = window.prompt("Nickname for this contact (empty to clear)", nickname ?? "");
+    if (next === null) return;
+    await saveNickname(contactId, next);
+    setNickname(next.trim() || undefined);
+  }
 
   function handleSend() {
     const trimmed = text.trim();
@@ -127,7 +154,10 @@ export function Conversation({
         <button className="secondary" onClick={onBack} aria-label="Back to menu">
           ← Menu
         </button>
-        <h1>Conversation</h1>
+        <h1 data-testid="conversation-title">{nickname ?? contactId}</h1>
+        <button className="icon" onClick={handleEditNickname} aria-label="Edit nickname">
+          ✎
+        </button>
         <span className="spacer" />
         <button className="icon" onClick={() => onStartCall("voice")} disabled={callActive} aria-label="Voice call">
           📞
@@ -153,6 +183,12 @@ export function Conversation({
         </label>
       </div>
 
+      {contactTyping && (
+        <p className="hint" data-testid="typing-indicator">
+          {nickname ?? contactId} is typing…
+        </p>
+      )}
+
       <p role="note" className="disclosure" data-testid="screenshot-disclosure">
         ⚠ Screenshots can't be detected on web - assume anything shown here can be captured.
       </p>
@@ -174,7 +210,10 @@ export function Conversation({
             type="text"
             placeholder="Type a message..."
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              setText(e.target.value);
+              onTyping();
+            }}
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
             disabled={sending}
           />

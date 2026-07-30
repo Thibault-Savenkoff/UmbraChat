@@ -47,6 +47,10 @@ interface TimerEnvelope {
   seconds: number;
 }
 
+interface TypingEnvelope {
+  type: "typing";
+}
+
 export interface CallOfferEnvelope {
   type: "call-offer";
   callId: string;
@@ -104,7 +108,7 @@ export function isGroupEnvelope(envelope: Envelope): envelope is GroupEnvelope {
   return envelope.type === "group-invite" || envelope.type === "group-update" || envelope.type === "group-text";
 }
 
-type Envelope = TextEnvelope | FileEnvelope | ReceiptEnvelope | FileOpenedEnvelope | TimerEnvelope | CallEnvelope | GroupEnvelope;
+type Envelope = TextEnvelope | FileEnvelope | ReceiptEnvelope | FileOpenedEnvelope | TimerEnvelope | TypingEnvelope | CallEnvelope | GroupEnvelope;
 
 /** The composite session address a contact's specific device is addressed by.
  * `wasm-crypto` treats this as an opaque string name (its own device_id field
@@ -146,6 +150,57 @@ export async function sendToContact(contactId: string, plaintext: Uint8Array, ac
 /** Sends a call-signaling envelope through the same encrypted pipe as everything else - never shown as a chat message. */
 export async function sendCallSignal(contactId: string, envelope: CallEnvelope, account: LocalAccount, store: SignalStore): Promise<void> {
   await sendToContact(contactId, new TextEncoder().encode(JSON.stringify(envelope)), account, store);
+}
+
+/**
+ * Sends a "typing" ping through the same encrypted pipe as everything else -
+ * never persisted, never shown as a chat message. Callers (the composer, see
+ * screens/Conversation.tsx) are responsible for debouncing and for only
+ * calling this while the typing-indicator preference is on.
+ */
+export async function sendTypingSignal(contactId: string, account: LocalAccount, store: SignalStore): Promise<void> {
+  const envelope: TypingEnvelope = { type: "typing" };
+  await sendToContact(contactId, new TextEncoder().encode(JSON.stringify(envelope)), account, store);
+}
+
+// A polled transport has no delivery guarantee for an explicit "stopped
+// typing" signal, so "is typing" is instead a rolling window: each incoming
+// ping resets the timer, and silence for this long clears it back to false.
+const TYPING_IDLE_MS = 5000;
+
+let typingActive = false;
+let typingIdleTimer: number | undefined;
+const typingListeners = new Set<(active: boolean) => void>();
+
+function setTypingActive(active: boolean): void {
+  typingActive = active;
+  for (const listener of typingListeners) listener(typingActive);
+}
+
+export function getTypingActive(): boolean {
+  return typingActive;
+}
+
+/** Subscribes to the open contact's typing state; returns an unsubscribe function. */
+export function subscribeToTypingState(listener: (active: boolean) => void): () => void {
+  typingListeners.add(listener);
+  return () => typingListeners.delete(listener);
+}
+
+// Only ever called from poll()'s already-open-contact branch (see poll's own
+// doc comment) - a typing signal from anyone else is dropped there and never
+// reaches this function, so there's no per-sender bookkeeping to do here.
+function handleTypingSignal(): void {
+  window.clearTimeout(typingIdleTimer);
+  setTypingActive(true);
+  typingIdleTimer = window.setTimeout(() => setTypingActive(false), TYPING_IDLE_MS);
+}
+
+/** Clears typing state immediately - call when leaving a conversation so a
+ * stale "is typing" doesn't bleed into whichever contact is opened next. */
+export function resetTypingState(): void {
+  window.clearTimeout(typingIdleTimer);
+  setTypingActive(false);
 }
 
 export const MAX_FILE_BYTES = 8 * 1024 * 1024;
@@ -437,6 +492,8 @@ export async function poll(
     } else if (envelope.type === "file-opened") {
       const target = messages.find((m) => m.id === envelope.refId && m.direction === "sent");
       if (target) target.status = "opened";
+    } else if (envelope.type === "typing") {
+      handleTypingSignal();
     } else {
       const target = messages.find((m) => m.id === envelope.refId && m.direction === "sent");
       if (target) {

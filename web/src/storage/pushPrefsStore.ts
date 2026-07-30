@@ -1,6 +1,7 @@
 const DB_NAME = "umbrachat-push-prefs";
 const STORE_NAME = "prefs";
 const RECORD_KEY = "displayLevel";
+const TYPING_INDICATOR_KEY = "typingIndicatorEnabled";
 
 export type PushDisplayLevel = "generic" | "silent";
 
@@ -37,6 +38,29 @@ export async function savePushDisplayLevel(level: PushDisplayLevel): Promise<voi
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
     tx.objectStore(STORE_NAME).put(level, RECORD_KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// ponytail: reuses this same small "prefs" store as a second key rather than
+// a whole new database, for one more boolean - same non-sensitive, opt-in-UI-
+// preference category as the display level above.
+
+export async function loadTypingIndicatorEnabled(): Promise<boolean> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const request = db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(TYPING_INDICATOR_KEY);
+    request.onsuccess = () => resolve((request.result as boolean | undefined) ?? false);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function saveTypingIndicatorEnabled(enabled: boolean): Promise<void> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    tx.objectStore(STORE_NAME).put(enabled, TYPING_INDICATOR_KEY);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });

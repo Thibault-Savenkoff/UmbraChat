@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 import { isEncryptionEnabled, enableEncryption, disableEncryption } from "../crypto/vault";
 import { exportBackup } from "../crypto/backup";
 import { registerPushSubscription, unregisterPushSubscription, vapidPublicKeyToUint8Array } from "../api/push";
-import { loadPushDisplayLevel, savePushDisplayLevel, type PushDisplayLevel } from "../storage/pushPrefsStore";
+import {
+  loadPushDisplayLevel,
+  savePushDisplayLevel,
+  loadTypingIndicatorEnabled,
+  saveTypingIndicatorEnabled,
+  type PushDisplayLevel,
+} from "../storage/pushPrefsStore";
 import type { LocalAccount } from "../storage/keyStore";
 
 interface SettingsProps {
@@ -40,6 +46,8 @@ export function Settings({ account, onBack }: SettingsProps) {
   const [notifError, setNotifError] = useState<string>();
   const [displayLevel, setDisplayLevel] = useState<PushDisplayLevel>("generic");
 
+  const [typingEnabled, setTypingEnabled] = useState(false);
+
   useEffect(() => {
     (async () => {
       if (!("serviceWorker" in navigator)) return;
@@ -48,7 +56,13 @@ export function Settings({ account, onBack }: SettingsProps) {
       setNotifEnabled(subscription !== null);
       setDisplayLevel(await loadPushDisplayLevel());
     })();
+    loadTypingIndicatorEnabled().then(setTypingEnabled);
   }, []);
+
+  async function handleToggleTypingIndicator(enabled: boolean) {
+    await saveTypingIndicatorEnabled(enabled);
+    setTypingEnabled(enabled);
+  }
 
   const canSubmit = passphrase.length >= MIN_PASSPHRASE_LENGTH && passphrase === confirm;
 
@@ -254,6 +268,21 @@ export function Settings({ account, onBack }: SettingsProps) {
           Works even when the app is closed - but on iPhone, only after adding it to your home screen.
         </p>
         {notifError && <p role="alert">{notifError}</p>}
+      </section>
+
+      <section className="panel stack">
+        <h2>Typing Indicator</h2>
+        <div className="row">
+          <span data-testid="typing-indicator-status">{typingEnabled ? "On" : "Off"}</span>
+          {typingEnabled ? (
+            <button className="danger" onClick={() => handleToggleTypingIndicator(false)}>
+              Disable
+            </button>
+          ) : (
+            <button onClick={() => handleToggleTypingIndicator(true)}>Enable</button>
+          )}
+        </div>
+        <p className="hint">Lets people you message see when you're typing. Off by default.</p>
       </section>
     </main>
   );

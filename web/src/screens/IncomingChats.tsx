@@ -1,6 +1,24 @@
+import { useEffect, useState } from "react";
+import { loadNickname } from "../storage/nicknameStore";
+
 interface IncomingChatsProps {
   pendingChats: string[];
   onOpen: (contactId: string) => void;
+}
+
+function IncomingChatRow({ contactId, onOpen }: { contactId: string; onOpen: (contactId: string) => void }) {
+  const [nickname, setNickname] = useState<string>();
+
+  useEffect(() => {
+    loadNickname(contactId).then(setNickname);
+  }, [contactId]);
+
+  return (
+    <li className="list-row" data-testid="incoming-chat-row">
+      <span className="list-row-label chip">{nickname ?? contactId}</span>
+      <button onClick={() => onOpen(contactId)}>Open</button>
+    </li>
+  );
 }
 
 /** Only rendered when non-empty - a transient "someone's trying to reach you"
@@ -13,10 +31,7 @@ export function IncomingChats({ pendingChats, onOpen }: IncomingChatsProps) {
       <h2>New Messages</h2>
       <ul>
         {pendingChats.map((contactId) => (
-          <li key={contactId} className="list-row" data-testid="incoming-chat-row">
-            <span className="list-row-label chip">{contactId}</span>
-            <button onClick={() => onOpen(contactId)}>Open</button>
-          </li>
+          <IncomingChatRow key={contactId} contactId={contactId} onOpen={onOpen} />
         ))}
       </ul>
     </section>
