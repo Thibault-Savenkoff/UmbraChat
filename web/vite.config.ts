@@ -1,5 +1,15 @@
+import { readFileSync, existsSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+
+// mkcert-generated dev cert (see .certs/), gitignored - WebCrypto is disabled
+// by every browser on plain HTTP unless the origin is localhost, so testing
+// on a real phone over the LAN needs real HTTPS. Gated behind VITE_HTTPS
+// rather than always-on: localhost itself already counts as a secure context
+// over plain HTTP, so e2e tests (which hardcode http://localhost:5173) and
+// day-to-day dev keep working unmodified; only LAN/mobile testing opts in
+// with `VITE_HTTPS=1 npm run dev -- --host`.
+const useHttps = process.env.VITE_HTTPS === '1' && existsSync('.certs/cert.pem') && existsSync('.certs/key.pem')
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -11,5 +21,11 @@ export default defineConfig({
       // dev server blocks serving files outside it by default.
       allow: ['..'],
     },
+    https: useHttps ? { cert: readFileSync('.certs/cert.pem'), key: readFileSync('.certs/key.pem') } : undefined,
+    // Keeps the API same-origin from the browser's point of view so an HTTPS
+    // page can call it without mixed-content blocking or CORS - Vite proxies
+    // to the plain-HTTP Rust server itself, server-to-server. Left on
+    // unconditionally since API_BASE defaults to same-origin either way.
+    proxy: { '/v1': 'http://localhost:3000' },
   },
 })

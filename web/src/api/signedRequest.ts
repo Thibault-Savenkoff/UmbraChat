@@ -2,8 +2,11 @@ import type { LocalAccount } from "../storage/keyStore";
 import { signWithIdentity } from "../crypto/identity";
 import { toBase64 } from "./codec";
 
-// ponytail: hardcoded dev API base, matches api/register.ts; add env-based config when there's a real deploy target.
-const API_BASE = "http://localhost:3000";
+// Same-origin by default - Vite's dev proxy (see vite.config.ts) forwards
+// /v1 to the Rust server, which keeps this working over HTTPS without
+// mixed-content blocking (matches api/register.ts). VITE_API_BASE overrides
+// it for a real deploy where the API isn't co-located.
+const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const hash = await crypto.subtle.digest("SHA-256", Uint8Array.from(bytes));

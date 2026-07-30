@@ -6,15 +6,21 @@ interface SafetyNumberProps {
 
 export function SafetyNumber({ accountId, safetyNumber, onContinue }: SafetyNumberProps) {
   return (
-    <main>
-      <h1>Your Safety Number</h1>
-      <p data-testid="safety-number">{safetyNumber}</p>
-      <p>Share this number with contacts to verify your identity.</p>
-      <p>
-        Your account ID: <span data-testid="account-id">{accountId}</span>
-      </p>
-      <p>Share this with a contact so they can start a conversation with you.</p>
+    <section className="panel stack">
+      <h2>Your Identity</h2>
+      <div>
+        <p className="hint">Safety number - share out of band to verify you're really you.</p>
+        <p className="chip chip--block" data-testid="safety-number">
+          {safetyNumber}
+        </p>
+      </div>
+      <div>
+        <p className="hint">Account ID - share this so contacts can message you.</p>
+        <p className="chip chip--block" data-testid="account-id">
+          {accountId}
+        </p>
+      </div>
       {onContinue && <button onClick={onContinue}>Continue</button>}
-    </main>
+    </section>
   );
 }

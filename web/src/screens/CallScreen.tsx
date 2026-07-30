@@ -44,18 +44,26 @@ export function CallScreen({ callState, onAccept, onDecline, onHangUp }: CallScr
 
   if (callState.status === "incoming-ringing") {
     return (
-      <div data-testid="incoming-call-banner">
-        <p>Incoming {callState.kind} call</p>
-        <button onClick={onAccept}>Accept</button>
-        <button onClick={onDecline}>Decline</button>
+      <div className="call-overlay">
+        <div className="call-card" data-testid="incoming-call-banner">
+          <p>Incoming {callState.kind} call</p>
+          <div className="call-actions">
+            <button onClick={onAccept}>Accept</button>
+            <button className="danger" onClick={onDecline}>
+              Decline
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
 
   if (callState.status === "ended") {
     return (
-      <div data-testid="call-ended">
-        <p data-testid="call-end-reason">{END_REASON_LABEL[callState.reason]}</p>
+      <div className="call-overlay">
+        <div className="call-card" data-testid="call-ended">
+          <p data-testid="call-end-reason">{END_REASON_LABEL[callState.reason]}</p>
+        </div>
       </div>
     );
   }
@@ -65,12 +73,26 @@ export function CallScreen({ callState, onAccept, onDecline, onHangUp }: CallScr
   const remoteStream = "remoteStream" in callState ? callState.remoteStream : null;
 
   return (
-    <div data-testid="active-call-screen">
-      <p data-testid="call-status-label">{callState.status === "outgoing-ringing" ? "Calling..." : callState.status === "connecting" ? "Connecting..." : "Connected"}</p>
-      {isVideo ? <VideoPane stream={remoteStream} muted={false} testId="remote-video" /> : <AudioPane stream={remoteStream} />}
-      {isVideo && <VideoPane stream={callState.localStream} muted testId="local-video" />}
-      <button onClick={toggleMute}>{muted ? "Unmute" : "Mute"}</button>
-      <button onClick={onHangUp}>Hang Up</button>
+    <div className="call-overlay">
+      <div className="call-card" data-testid="active-call-screen">
+        <p data-testid="call-status-label">{callState.status === "outgoing-ringing" ? "Calling..." : callState.status === "connecting" ? "Connecting..." : "Connected"}</p>
+        {isVideo ? (
+          <div className="video-grid">
+            <VideoPane stream={remoteStream} muted={false} testId="remote-video" />
+            <VideoPane stream={callState.localStream} muted testId="local-video" />
+          </div>
+        ) : (
+          <AudioPane stream={remoteStream} />
+        )}
+        <div className="call-actions">
+          <button className="secondary" onClick={toggleMute}>
+            {muted ? "Unmute" : "Mute"}
+          </button>
+          <button className="danger" onClick={onHangUp}>
+            Hang Up
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
