@@ -9,11 +9,12 @@ interface GroupConversationProps {
   messages: ChatMessage[];
   onSend: (text: string) => void;
   onRemoveMember: (memberAccountId: string) => void;
+  onBack: () => void;
   sending: boolean;
   error?: string;
 }
 
-export function GroupConversation({ group, account, messages, onSend, onRemoveMember, sending, error }: GroupConversationProps) {
+export function GroupConversation({ group, account, messages, onSend, onRemoveMember, onBack, sending, error }: GroupConversationProps) {
   const [text, setText] = useState("");
 
   function handleSend() {
@@ -24,35 +25,53 @@ export function GroupConversation({ group, account, messages, onSend, onRemoveMe
   }
 
   return (
-    <main>
-      <h1>{group.name}</h1>
-      <ul data-testid="group-message-list">
+    <main className="convo screen">
+      <div className="convo-toolbar">
+        <button className="secondary" onClick={onBack} aria-label="Back to menu">
+          ← Menu
+        </button>
+        <h1>{group.name}</h1>
+      </div>
+
+      <ul className="message-list" data-testid="group-message-list">
+        {messages.length === 0 && <li className="message-list-empty">No messages yet - say hi.</li>}
         {messages.map((m) => (
-          <li key={m.id} data-testid="group-message">
-            {m.direction === "received" ? `${m.senderAccountId}: ` : ""}
+          <li key={m.id} className={m.direction === "sent" ? "group-message-sent" : "group-message-received"} data-testid="group-message">
+            {m.direction === "received" ? <span className="status">{m.senderAccountId}: </span> : null}
             {m.text}
           </li>
         ))}
       </ul>
-      <ul data-testid="group-member-list">
-        {group.memberAccountIds.map((id) => (
-          <li key={id} data-testid="group-member">
-            {id}
-            {id !== account.accountId && <button onClick={() => onRemoveMember(id)}>Remove</button>}
-          </li>
-        ))}
-      </ul>
-      <input
-        type="text"
-        placeholder="Type a message..."
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && handleSend()}
-        disabled={sending}
-      />
-      <button onClick={handleSend} disabled={sending || !text.trim()}>
-        Send
-      </button>
+
+      <section className="panel stack">
+        <h2>Members</h2>
+        <ul data-testid="group-member-list">
+          {group.memberAccountIds.map((id) => (
+            <li key={id} className="list-row" data-testid="group-member">
+              <span className="list-row-label chip">{id}</span>
+              {id !== account.accountId && (
+                <button className="danger" onClick={() => onRemoveMember(id)}>
+                  Remove
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <div className="composer">
+        <input
+          type="text"
+          placeholder="Type a message..."
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleSend()}
+          disabled={sending}
+        />
+        <button onClick={handleSend} disabled={sending || !text.trim()}>
+          Send
+        </button>
+      </div>
       {error && <p role="alert">{error}</p>}
     </main>
   );

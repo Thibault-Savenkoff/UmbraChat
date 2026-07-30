@@ -50,23 +50,35 @@ export function LinkedDevices({ account }: LinkedDevicesProps) {
   }
 
   return (
-    <section>
+    <section className="panel stack">
       <h2>Linked Devices</h2>
       <ul data-testid="device-list">
+        {devices.length === 0 && <li className="list-empty">No devices yet.</li>}
         {devices.map((d) => (
-          <li key={d.id} data-testid="device-row">
-            {d.label}
-            {d.id === account.deviceId && " (this device)"}
-            <button onClick={() => handleUnlink(d.id)}>Unlink</button>
+          <li key={d.id} className="list-row" data-testid="device-row">
+            <span className="list-row-label">
+              {d.label}
+              {d.id === account.deviceId && " (this device)"}
+            </span>
+            <button className="secondary" onClick={() => handleUnlink(d.id)}>
+              Unlink
+            </button>
           </li>
         ))}
       </ul>
-      <button onClick={handleLinkInit}>Link a New Device</button>
+      <button className="secondary" onClick={handleLinkInit}>
+        Link a New Device
+      </button>
       {code && (
-        <p>
-          On the new device, choose "Link to existing account" and enter account ID <strong>{account.accountId}</strong> with code{" "}
-          <strong data-testid="link-code">{code}</strong> - expires in 5 minutes.
-        </p>
+        <div className="stack">
+          <p className="hint">
+            On the new device, choose "Link to existing account" and enter this account ID and code - expires in 5 minutes.
+          </p>
+          <p className="chip chip--block">{account.accountId}</p>
+          <p className="chip chip--block" data-testid="link-code">
+            {code}
+          </p>
+        </div>
       )}
       {error && <p role="alert">{error}</p>}
     </section>

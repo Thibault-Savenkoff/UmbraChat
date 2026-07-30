@@ -5,7 +5,7 @@ import { loadAccount, saveAccount, type LocalAccount } from "./storage/keyStore"
 import { loadMessages, type ChatMessage } from "./storage/messageStore";
 import { registerAccount } from "./api/register";
 import { completeLink } from "./api/devices";
-import { startConversation, sendText, sendFile, markFileOpened, poll, getTimerSeconds, setDisappearingTimer, type FileSendStage, type FileDestruct } from "./chat/conversation";
+import { startConversation, sendText, sendFile, markFileOpened, markConversationRead, poll, getTimerSeconds, setDisappearingTimer, type FileSendStage, type FileDestruct } from "./chat/conversation";
 import { startCall, acceptCall, declineCall, hangUp, handleCallSignal, subscribeToCallState, getCallState, type CallState } from "./chat/call";
 import { createGroup, sendGroupText, removeMember, handleGroupSignal, loadAllGroups, type Group } from "./chat/group";
 import { openStore } from "./crypto/session";
@@ -18,6 +18,7 @@ import { Conversation } from "./screens/Conversation";
 import { CallScreen } from "./screens/CallScreen";
 import { Groups } from "./screens/Groups";
 import { GroupConversation } from "./screens/GroupConversation";
+import { IncomingChats } from "./screens/IncomingChats";
 
 const ACTIVE_CONTACT_KEY = "umbrachat:activeContactId";
 const POLL_INTERVAL_MS = 3000;
@@ -43,10 +44,29 @@ function App() {
   const [callState, setCallState] = useState<CallState>(getCallState());
   const [timerSeconds, setTimerSecondsState] = useState(0);
   const [error, setError] = useState<string>();
+  // Senders who've messaged while idle on the identity-ready screen, that
+  // haven't been opened yet - lets the recipient side of a new conversation
+  // find out without already knowing to type the sender's account id first.
+  const [pendingChats, setPendingChats] = useState<string[]>([]);
   const pollTimer = useRef<number>(undefined);
   const pollIntervalRef = useRef(POLL_INTERVAL_MS);
+  // Whichever screen's runPoll is currently active - iOS Safari (and other
+  // mobile browsers) suspend setInterval almost entirely in a backgrounded
+  // tab, so a message sent while the tab was in the background can sit
+  // un-polled long after it arrives server-side. Firing one poll the moment
+  // the tab becomes visible again catches up immediately instead of waiting
+  // for the next interval tick, which may not come for a while.
+  const activePollRef = useRef<() => Promise<void>>(undefined);
 
   useEffect(() => subscribeToCallState(setCallState), []);
+
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === "visible") void activePollRef.current?.();
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
 
   useEffect(() => {
     loadAccount().then(async (existing) => {
@@ -70,6 +90,16 @@ function App() {
   // about one without already knowing its groupId, or happening to have some
   // unrelated 1:1 conversation open). Screens are mutually exclusive in this
   // app, so there's no concurrent-poller risk in giving this one its own turn.
+  // Fires from any screen's poll, not just the identity-ready one - most real
+  // sessions resume straight into a cached conversation (see ACTIVE_CONTACT_KEY
+  // below) and never touch identity-ready at all, so a notice that only fired
+  // from there would almost never actually surface. pendingChats itself is
+  // only ever rendered on the identity-ready screen, so an entry captured
+  // elsewhere just waits quietly until the user navigates back to it.
+  function addPendingChat(senderId: string) {
+    setPendingChats((prev) => (prev.includes(senderId) ? prev : [...prev, senderId]));
+  }
+
   async function enterIdentityReady(account: LocalAccount) {
     const safetyNumber = await computeSafetyNumber(account.identity.identity_public_key);
     const groups = await loadAllGroups();
@@ -77,10 +107,11 @@ function App() {
 
     const store = await openStore(account.identity);
     const runPoll = async () => {
-      await poll(undefined, account, store, undefined, handleGroupSignal);
+      await poll(undefined, account, store, undefined, handleGroupSignal, addPendingChat);
       const updatedGroups = await loadAllGroups();
       setState((s) => (s.status === "identity-ready" ? { ...s, groups: updatedGroups } : s));
     };
+    activePollRef.current = runPoll;
 
     window.clearInterval(pollTimer.current);
     pollTimer.current = undefined;
@@ -96,8 +127,15 @@ function App() {
     setTimerSecondsState(getTimerSeconds(contactId));
     localStorage.setItem(ACTIVE_CONTACT_KEY, contactId);
 
+    // The user is actually looking at this conversation now - this is the
+    // real "read" moment, not whenever a background poll happened to
+    // decrypt a message from a sender nobody had opened yet (see
+    // markConversationRead's doc comment for the presence-oracle it fixes).
+    const readMessages = await markConversationRead(contactId, account, store);
+    setState((s) => (s.status === "conversation" && s.contactId === contactId ? { ...s, messages: readMessages } : s));
+
     const runPoll = async () => {
-      const updated = await poll(contactId, account, store, handleCallSignal, handleGroupSignal);
+      const updated = await poll(contactId, account, store, handleCallSignal, handleGroupSignal, addPendingChat);
       setState((s) => (s.status === "conversation" ? { ...s, messages: updated } : s));
       setTimerSecondsState(getTimerSeconds(contactId));
 
@@ -111,6 +149,7 @@ function App() {
         pollTimer.current = window.setInterval(runPoll, desiredInterval);
       }
     };
+    activePollRef.current = runPoll;
 
     window.clearInterval(pollTimer.current);
     pollTimer.current = undefined;
@@ -133,10 +172,11 @@ function App() {
       // poll()'s own return value is always [] with no contactId - a group's
       // messages are written straight to storage by handleGroupSignal instead,
       // so they're reloaded from there, not taken from poll()'s result.
-      await poll(undefined, account, store, undefined, handleGroupSignal);
+      await poll(undefined, account, store, undefined, handleGroupSignal, addPendingChat);
       const [refreshedGroup, updatedMessages] = await Promise.all([loadGroup(groupId), loadMessages(groupId)]);
       setState((s) => (s.status === "group" && refreshedGroup ? { ...s, group: refreshedGroup, messages: updatedMessages } : s));
     };
+    activePollRef.current = runPoll;
 
     window.clearInterval(pollTimer.current);
     pollTimer.current = undefined;
@@ -179,6 +219,10 @@ function App() {
 
   async function handleStartConversation(contactId: string) {
     if (state.status !== "identity-ready") return;
+    if (contactId === state.account.accountId) {
+      setError("that's your own account id - enter a contact's id instead");
+      return;
+    }
     setStarting(true);
     setError(undefined);
     try {
@@ -266,6 +310,18 @@ function App() {
     }
   }
 
+  async function handleOpenPendingChat(contactId: string) {
+    if (state.status !== "identity-ready") return;
+    setPendingChats((prev) => prev.filter((id) => id !== contactId));
+    await enterConversation(state.account, contactId);
+  }
+
+  async function handleBackToMenu() {
+    if (state.status !== "conversation" && state.status !== "group") return;
+    localStorage.removeItem(ACTIVE_CONTACT_KEY);
+    await enterIdentityReady(state.account);
+  }
+
   async function handleRemoveMember(memberAccountId: string) {
     if (state.status !== "group") return;
     setError(undefined);
@@ -280,44 +336,55 @@ function App() {
   if (state.status === "loading") return null;
 
   if (state.status === "anonymous") {
-    return <CreateAccount onCreate={handleCreate} onLink={handleLinkDevice} creating={creating} error={error} />;
+    return (
+      <div className="app-shell">
+        <CreateAccount onCreate={handleCreate} onLink={handleLinkDevice} creating={creating} error={error} />
+      </div>
+    );
   }
 
   if (state.status === "identity-ready") {
     return (
-      <>
-        <SafetyNumber accountId={state.account.accountId} safetyNumber={state.safetyNumber} />
-        <LinkedDevices account={state.account} />
-        <Groups groups={state.groups} onCreateGroup={handleCreateGroup} onOpenGroup={handleOpenGroup} creating={creating} error={error} />
-        <NewConversation onStart={handleStartConversation} starting={starting} error={error} />
-      </>
+      <div className="app-shell">
+        <div className="screen">
+          <h1>UmbraChat</h1>
+          <IncomingChats pendingChats={pendingChats} onOpen={handleOpenPendingChat} />
+          <SafetyNumber accountId={state.account.accountId} safetyNumber={state.safetyNumber} />
+          <LinkedDevices account={state.account} />
+          <Groups groups={state.groups} ownAccountId={state.account.accountId} onCreateGroup={handleCreateGroup} onOpenGroup={handleOpenGroup} creating={creating} error={error} />
+          <NewConversation onStart={handleStartConversation} starting={starting} error={error} />
+        </div>
+      </div>
     );
   }
 
   if (state.status === "group") {
     return (
-      <GroupConversation
-        group={state.group}
-        account={state.account}
-        messages={state.messages}
-        onSend={handleSendGroupText}
-        onRemoveMember={handleRemoveMember}
-        sending={sending}
-        error={error}
-      />
+      <div className="app-shell">
+        <GroupConversation
+          group={state.group}
+          account={state.account}
+          messages={state.messages}
+          onSend={handleSendGroupText}
+          onRemoveMember={handleRemoveMember}
+          onBack={handleBackToMenu}
+          sending={sending}
+          error={error}
+        />
+      </div>
     );
   }
 
   const { contactId, account, store } = state;
 
   return (
-    <>
+    <div className="app-shell">
       {callState.status !== "idle" && (
         <CallScreen
           callState={callState}
-          onAccept={() => void acceptCall(contactId, account, store)}
-          onDecline={() => void declineCall(contactId, account, store)}
-          onHangUp={() => void hangUp(contactId, account, store)}
+          onAccept={() => acceptCall(contactId, account, store).catch((err) => console.error("acceptCall failed:", err))}
+          onDecline={() => declineCall(contactId, account, store).catch((err) => console.error("declineCall failed:", err))}
+          onHangUp={() => hangUp(contactId, account, store).catch((err) => console.error("hangUp failed:", err))}
         />
       )}
       <Conversation
@@ -325,15 +392,16 @@ function App() {
         onSend={handleSend}
         onSendFile={handleSendFile}
         onOpenFile={handleOpenFile}
-        onStartCall={(kind) => void startCall(contactId, kind, account, store)}
+        onStartCall={(kind) => startCall(contactId, kind, account, store).catch((err) => console.error("startCall failed:", err))}
         onSetTimer={handleSetTimer}
+        onBack={handleBackToMenu}
         sending={sending}
         fileStage={fileStage}
         callActive={callState.status !== "idle" && callState.status !== "ended"}
         timerSeconds={timerSeconds}
         error={error}
       />
-    </>
+    </div>
   );
 }
 

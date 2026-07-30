@@ -9,6 +9,7 @@ interface ConversationProps {
   onOpenFile: (messageId: string) => void;
   onStartCall: (kind: "voice" | "video") => void;
   onSetTimer: (seconds: number) => void;
+  onBack: () => void;
   sending: boolean;
   fileStage?: FileSendStage;
   callActive: boolean;
@@ -59,9 +60,11 @@ function FileMessage({ message, onOpenFile }: { message: ChatMessage; onOpenFile
   // session (freed on reload/close); fine at this scale.
   const url = useMemo(() => URL.createObjectURL(new Blob([Uint8Array.from(file.bytes)], { type: file.mimeType })), [message.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const selfDestructs = message.destructOnOpen || message.timerSeconds || message.expiresAt;
+  const isImage = file.mimeType.startsWith("image/");
 
   return (
     <span data-testid="file-message">
+      {isImage && <img src={url} alt={file.filename} className="file-preview" data-testid="file-preview" />}
       📎 {file.filename} ({formatSize(file.size)}){selfDestructs && <span data-testid="destruct-marker"> 🔥</span>}
       {message.direction === "sent" ? (
         <span data-testid="message-status"> ({message.status})</span>
@@ -82,6 +85,7 @@ export function Conversation({
   onOpenFile,
   onStartCall,
   onSetTimer,
+  onBack,
   sending,
   fileStage,
   callActive,
@@ -104,7 +108,10 @@ export function Conversation({
     e.target.value = ""; // allow picking the same file again
     if (!file) return;
     setFileError(undefined);
-    if (isFileTooLarge(file)) {
+    // Images get re-encoded (and usually shrunk a lot) before the real size
+    // check, inside sendFile - skip the early check here so a large-but-will-
+    // compress-fine photo isn't rejected before it even gets the chance.
+    if (!file.type.startsWith("image/") && isFileTooLarge(file)) {
       setFileError(`${file.name} is too large (max 8MB)`);
       return;
     }
@@ -115,34 +122,43 @@ export function Conversation({
   }
 
   return (
-    <main>
-      <h1>Conversation</h1>
-      <p role="note" data-testid="screenshot-disclosure">
+    <main className="convo screen screen--wide">
+      <div className="convo-toolbar">
+        <button className="secondary" onClick={onBack} aria-label="Back to menu">
+          ← Menu
+        </button>
+        <h1>Conversation</h1>
+        <span className="spacer" />
+        <button className="icon" onClick={() => onStartCall("voice")} disabled={callActive} aria-label="Voice call">
+          📞
+        </button>
+        <button className="icon" onClick={() => onStartCall("video")} disabled={callActive} aria-label="Video call">
+          🎥
+        </button>
+        <label className="row">
+          ⏱
+          <select
+            data-testid="timer-picker"
+            aria-label="Disappearing message timer"
+            value={timerSeconds}
+            onChange={(e) => onSetTimer(Number(e.target.value))}
+            disabled={sending}
+          >
+            {TIMER_OPTIONS.map(([seconds, label]) => (
+              <option key={seconds} value={seconds}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <p role="note" className="disclosure" data-testid="screenshot-disclosure">
         ⚠ Screenshots can't be detected on web - assume anything shown here can be captured.
       </p>
-      <button onClick={() => onStartCall("voice")} disabled={callActive} aria-label="Voice call">
-        📞
-      </button>
-      <button onClick={() => onStartCall("video")} disabled={callActive} aria-label="Video call">
-        🎥
-      </button>
-      <label>
-        ⏱
-        <select
-          data-testid="timer-picker"
-          aria-label="Disappearing message timer"
-          value={timerSeconds}
-          onChange={(e) => onSetTimer(Number(e.target.value))}
-          disabled={sending}
-        >
-          {TIMER_OPTIONS.map(([seconds, label]) => (
-            <option key={seconds} value={seconds}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <ul data-testid="message-list">
+
+      <ul className="message-list" data-testid="message-list">
+        {messages.length === 0 && <li className="message-list-empty">No messages yet - say hi.</li>}
         {messages.map((m) => (
           <li key={m.id} data-testid={`message-${m.direction}`}>
             {m.file ? <FileMessage message={m} onOpenFile={onOpenFile} /> : <span>{m.text}</span>}
@@ -151,26 +167,44 @@ export function Conversation({
           </li>
         ))}
       </ul>
-      <input
-        type="text"
-        placeholder="Type a message..."
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && handleSend()}
-        disabled={sending}
-      />
-      <input type="file" aria-label="Attach a file" onChange={handleFilePick} disabled={sending} />
-      <select data-testid="file-destruct-mode" aria-label="Self-destruct mode for the next file" value={destructMode} onChange={(e) => setDestructMode(e.target.value)} disabled={sending}>
-        {DESTRUCT_OPTIONS.map(([value, label]) => (
-          <option key={value} value={value}>
-            {label}
-          </option>
-        ))}
-      </select>
-      <button onClick={handleSend} disabled={sending || !text.trim()}>
-        Send
-      </button>
-      {fileStage && fileStage !== "sent" && <p data-testid="file-stage">{fileStage}...</p>}
+
+      <div className="stack">
+        <div className="composer">
+          <input
+            type="text"
+            placeholder="Type a message..."
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSend()}
+            disabled={sending}
+          />
+          <button onClick={handleSend} disabled={sending || !text.trim()}>
+            Send
+          </button>
+        </div>
+        <div className="file-row">
+          <input type="file" aria-label="Attach a file" onChange={handleFilePick} disabled={sending} />
+          <select
+            data-testid="file-destruct-mode"
+            aria-label="Self-destruct mode for the next file"
+            value={destructMode}
+            onChange={(e) => setDestructMode(e.target.value)}
+            disabled={sending}
+          >
+            {DESTRUCT_OPTIONS.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {fileStage && fileStage !== "sent" && (
+        <p className="hint" data-testid="file-stage">
+          {fileStage}...
+        </p>
+      )}
       {fileError && <p role="alert">{fileError}</p>}
       {error && <p role="alert">{error}</p>}
     </main>

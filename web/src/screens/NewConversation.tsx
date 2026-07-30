@@ -10,8 +10,8 @@ export function NewConversation({ onStart, starting, error }: NewConversationPro
   const [contactId, setContactId] = useState("");
 
   return (
-    <main>
-      <h1>UmbraChat</h1>
+    <section className="panel stack">
+      <h2>New Conversation</h2>
       <input
         type="text"
         placeholder="Recipient account id"
@@ -23,6 +23,6 @@ export function NewConversation({ onStart, starting, error }: NewConversationPro
         {starting ? "Starting..." : "Start Conversation"}
       </button>
       {error && <p role="alert">{error}</p>}
-    </main>
+    </section>
   );
 }
