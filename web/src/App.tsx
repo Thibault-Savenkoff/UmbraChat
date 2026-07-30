@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SignalStore } from "wasm-crypto";
 import { generateIdentity, computeSafetyNumber } from "./crypto/identity";
 import { loadAccount, saveAccount, type LocalAccount } from "./storage/keyStore";
+import { importBackup } from "./crypto/backup";
 import { isEncryptionEnabled, isVaultActive, unlock } from "./crypto/vault";
 import { loadMessages, type ChatMessage } from "./storage/messageStore";
 import { registerAccount } from "./api/register";
@@ -241,6 +242,19 @@ function App() {
     }
   }
 
+  async function handleRestore(file: File, passphrase: string) {
+    setCreating(true);
+    setError(undefined);
+    try {
+      const account = await importBackup(file, passphrase);
+      await enterIdentityReady(account);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed to restore backup");
+    } finally {
+      setCreating(false);
+    }
+  }
+
   async function handleStartConversation(contactId: string) {
     if (state.status !== "identity-ready") return;
     if (contactId === state.account.accountId) {
@@ -375,7 +389,7 @@ function App() {
   if (state.status === "anonymous") {
     return (
       <div className="app-shell">
-        <CreateAccount onCreate={handleCreate} onLink={handleLinkDevice} creating={creating} error={error} />
+        <CreateAccount onCreate={handleCreate} onLink={handleLinkDevice} onRestore={handleRestore} creating={creating} error={error} />
       </div>
     );
   }

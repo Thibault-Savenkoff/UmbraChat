@@ -3,13 +3,16 @@ import { useState } from "react";
 interface CreateAccountProps {
   onCreate: () => void;
   onLink: (accountId: string, code: string) => void;
+  onRestore: (file: File, passphrase: string) => void;
   creating: boolean;
   error?: string;
 }
 
-export function CreateAccount({ onCreate, onLink, creating, error }: CreateAccountProps) {
+export function CreateAccount({ onCreate, onLink, onRestore, creating, error }: CreateAccountProps) {
   const [linkAccountId, setLinkAccountId] = useState("");
   const [linkCode, setLinkCode] = useState("");
+  const [backupFile, setBackupFile] = useState<File>();
+  const [backupPassphrase, setBackupPassphrase] = useState("");
 
   return (
     <main className="screen">
@@ -31,6 +34,31 @@ export function CreateAccount({ onCreate, onLink, creating, error }: CreateAccou
         <input placeholder="Pairing code" value={linkCode} onChange={(e) => setLinkCode(e.target.value)} disabled={creating} />
         <button className="secondary" onClick={() => onLink(linkAccountId, linkCode)} disabled={creating || !linkAccountId.trim() || !linkCode.trim()}>
           Link This Device
+        </button>
+      </div>
+
+      <div className="panel stack">
+        <h2>Lost your device?</h2>
+        <input
+          type="file"
+          accept=".json"
+          aria-label="Backup file"
+          onChange={(e) => setBackupFile(e.target.files?.[0])}
+          disabled={creating}
+        />
+        <input
+          type="password"
+          placeholder="Backup passphrase"
+          value={backupPassphrase}
+          onChange={(e) => setBackupPassphrase(e.target.value)}
+          disabled={creating}
+        />
+        <button
+          className="secondary"
+          onClick={() => backupFile && onRestore(backupFile, backupPassphrase)}
+          disabled={creating || !backupFile || !backupPassphrase}
+        >
+          {creating ? "Restoring..." : "Restore from Backup"}
         </button>
       </div>
 
