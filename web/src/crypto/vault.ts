@@ -1,4 +1,7 @@
 import { toBase64, fromBase64 } from "../api/codec";
+import { loadAccount, saveAccount, loadSession, saveSession, listSessionContactIds } from "../storage/keyStore";
+import { loadMessages, saveMessages, listMessageContactIds } from "../storage/messageStore";
+import { loadAllGroups, saveGroup } from "../storage/groupStore";
 
 const SALT_KEY = "umbrachat:vaultSalt";
 const ENABLED_KEY = "umbrachat:vaultEnabled";
@@ -109,4 +112,52 @@ export async function unlock(passphrase: string, verify: () => Promise<unknown>)
     activeKey = null; // wrong passphrase - GCM auth tag check failed
     return false;
   }
+}
+
+/**
+ * Turns encryption on for the first time. Ordering matters: every existing
+ * record is read out *before* the key is activated (so those reads hit the
+ * plaintext passthrough), then the key/flag are set, then everything is
+ * written back out (now hitting the encrypt path) - doing this in the wrong
+ * order means trying to decrypt-with-the-new-key data that's still in the
+ * old plaintext shape, or the reverse.
+ */
+export async function enableEncryption(passphrase: string): Promise<void> {
+  const account = await loadAccount();
+  const sessionIds = await listSessionContactIds();
+  const sessions = await Promise.all(sessionIds.map(async (id) => [id, await loadSession(id)] as const));
+  const messageIds = await listMessageContactIds();
+  const messages = await Promise.all(messageIds.map(async (id) => [id, await loadMessages(id)] as const));
+  const groups = await loadAllGroups();
+
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await deriveKey(passphrase, salt);
+  localStorage.setItem(SALT_KEY, toBase64(salt));
+  localStorage.setItem(ENABLED_KEY, "1");
+  activeKey = key;
+
+  if (account) await saveAccount(account);
+  for (const [id, bytes] of sessions) if (bytes) await saveSession(id, bytes);
+  for (const [id, msgs] of messages) await saveMessages(id, msgs);
+  for (const group of groups) await saveGroup(group);
+}
+
+/** Reverse of enableEncryption: read everything while still encrypted, THEN
+ * clear the key/flag, THEN write everything back out as plaintext. */
+export async function disableEncryption(): Promise<void> {
+  const account = await loadAccount();
+  const sessionIds = await listSessionContactIds();
+  const sessions = await Promise.all(sessionIds.map(async (id) => [id, await loadSession(id)] as const));
+  const messageIds = await listMessageContactIds();
+  const messages = await Promise.all(messageIds.map(async (id) => [id, await loadMessages(id)] as const));
+  const groups = await loadAllGroups();
+
+  activeKey = null;
+  localStorage.removeItem(SALT_KEY);
+  localStorage.removeItem(ENABLED_KEY);
+
+  if (account) await saveAccount(account);
+  for (const [id, bytes] of sessions) if (bytes) await saveSession(id, bytes);
+  for (const [id, msgs] of messages) await saveMessages(id, msgs);
+  for (const group of groups) await saveGroup(group);
 }

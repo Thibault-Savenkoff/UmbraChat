@@ -19,6 +19,7 @@ import { CallScreen } from "./screens/CallScreen";
 import { Groups } from "./screens/Groups";
 import { GroupConversation } from "./screens/GroupConversation";
 import { IncomingChats } from "./screens/IncomingChats";
+import { Settings } from "./screens/Settings";
 
 const ACTIVE_CONTACT_KEY = "umbrachat:activeContactId";
 const POLL_INTERVAL_MS = 3000;
@@ -33,7 +34,8 @@ type Status =
   | { status: "anonymous" }
   | { status: "identity-ready"; account: LocalAccount; safetyNumber: string; groups: Group[] }
   | { status: "conversation"; account: LocalAccount; contactId: string; store: SignalStore; messages: ChatMessage[] }
-  | { status: "group"; account: LocalAccount; group: Group; store: SignalStore; messages: ChatMessage[] };
+  | { status: "group"; account: LocalAccount; group: Group; store: SignalStore; messages: ChatMessage[] }
+  | { status: "settings"; account: LocalAccount };
 
 function App() {
   const [state, setState] = useState<Status>({ status: "loading" });
@@ -317,9 +319,14 @@ function App() {
   }
 
   async function handleBackToMenu() {
-    if (state.status !== "conversation" && state.status !== "group") return;
+    if (state.status !== "conversation" && state.status !== "group" && state.status !== "settings") return;
     localStorage.removeItem(ACTIVE_CONTACT_KEY);
     await enterIdentityReady(state.account);
+  }
+
+  function handleOpenSettings() {
+    if (state.status !== "identity-ready") return;
+    setState({ status: "settings", account: state.account });
   }
 
   async function handleRemoveMember(memberAccountId: string) {
@@ -353,7 +360,18 @@ function App() {
           <LinkedDevices account={state.account} />
           <Groups groups={state.groups} ownAccountId={state.account.accountId} onCreateGroup={handleCreateGroup} onOpenGroup={handleOpenGroup} creating={creating} error={error} />
           <NewConversation onStart={handleStartConversation} starting={starting} error={error} />
+          <button className="secondary" onClick={handleOpenSettings}>
+            Settings
+          </button>
         </div>
+      </div>
+    );
+  }
+
+  if (state.status === "settings") {
+    return (
+      <div className="app-shell">
+        <Settings onBack={handleBackToMenu} />
       </div>
     );
   }
