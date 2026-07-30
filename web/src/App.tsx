@@ -450,6 +450,7 @@ function App() {
         />
       )}
       <Conversation
+        contactId={contactId}
         messages={state.messages}
         onSend={handleSend}
         onSendFile={handleSendFile}

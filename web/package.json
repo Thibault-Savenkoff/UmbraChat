@@ -24,7 +24,8 @@
     "e2e:local-encryption": "node e2e-local-encryption.mjs",
     "e2e:backup-restore": "node e2e-backup-restore.mjs",
     "e2e:service-worker": "node e2e-service-worker.mjs",
-    "e2e:push-notifications": "node e2e-push-notifications.mjs"
+    "e2e:push-notifications": "node e2e-push-notifications.mjs",
+    "e2e:nicknames": "node e2e-nicknames.mjs"
   },
   "dependencies": {
     "react": "^19.2.7",

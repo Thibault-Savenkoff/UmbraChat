@@ -1,8 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ChatMessage } from "../storage/messageStore";
 import { isFileTooLarge, type FileDestruct, type FileSendStage } from "../chat/conversation";
+import { loadNickname, saveNickname } from "../storage/nicknameStore";
 
 interface ConversationProps {
+  contactId: string;
   messages: ChatMessage[];
   onSend: (text: string) => void;
   onSendFile: (file: File, destruct?: FileDestruct) => void;
@@ -79,6 +81,7 @@ function FileMessage({ message, onOpenFile }: { message: ChatMessage; onOpenFile
 }
 
 export function Conversation({
+  contactId,
   messages,
   onSend,
   onSendFile,
@@ -95,6 +98,18 @@ export function Conversation({
   const [text, setText] = useState("");
   const [fileError, setFileError] = useState<string>();
   const [destructMode, setDestructMode] = useState("none");
+  const [nickname, setNickname] = useState<string>();
+
+  useEffect(() => {
+    loadNickname(contactId).then(setNickname);
+  }, [contactId]);
+
+  async function handleEditNickname() {
+    const next = window.prompt("Nickname for this contact (empty to clear)", nickname ?? "");
+    if (next === null) return;
+    await saveNickname(contactId, next);
+    setNickname(next.trim() || undefined);
+  }
 
   function handleSend() {
     const trimmed = text.trim();
@@ -127,7 +142,10 @@ export function Conversation({
         <button className="secondary" onClick={onBack} aria-label="Back to menu">
           ← Menu
         </button>
-        <h1>Conversation</h1>
+        <h1 data-testid="conversation-title">{nickname ?? contactId}</h1>
+        <button className="icon" onClick={handleEditNickname} aria-label="Edit nickname">
+          ✎
+        </button>
         <span className="spacer" />
         <button className="icon" onClick={() => onStartCall("voice")} disabled={callActive} aria-label="Voice call">
           📞
