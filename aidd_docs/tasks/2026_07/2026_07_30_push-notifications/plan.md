@@ -1,6 +1,6 @@
 ---
 objective: "A user who opts in from Settings gets a real OS-level notification when a message arrives while the app is fully closed, showing either a generic 'New message' or nothing distinguishing at all - never sender or content - and the app becomes installable as a PWA, which iOS requires for this to work at all."
-status: in-progress
+status: implemented
 ---
 
 # Plan: Push notifications (generic/silent)
