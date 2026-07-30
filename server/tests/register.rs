@@ -7,7 +7,7 @@ use umbrachat_server::{db, routes};
 
 async fn app() -> axum::Router {
     let pool = db::connect().await;
-    routes::router(pool)
+    routes::router(pool, "4rISdCDvPIdiTUpJbPqHt2gi3TCVqEq0sCnqi9iykXQ".to_string())
 }
 
 fn valid_register_body() -> Value {

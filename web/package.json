@@ -22,7 +22,9 @@
     "e2e:large-file": "node e2e-large-file.mjs",
     "e2e:no-presence-oracle": "node e2e-no-presence-oracle.mjs",
     "e2e:local-encryption": "node e2e-local-encryption.mjs",
-    "e2e:backup-restore": "node e2e-backup-restore.mjs"
+    "e2e:backup-restore": "node e2e-backup-restore.mjs",
+    "e2e:service-worker": "node e2e-service-worker.mjs",
+    "e2e:push-notifications": "node e2e-push-notifications.mjs"
   },
   "dependencies": {
     "react": "^19.2.7",

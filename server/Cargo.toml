@@ -17,8 +17,11 @@ sqlx = { version = "0.9.0", features = ["postgres", "runtime-tokio", "tls-rustls
 tokio = { version = "1.53.1", features = ["full"] }
 tower-http = { version = "0.7.0", features = ["cors"] }
 uuid = { version = "1.24.0", features = ["v4", "serde"] }
+web-push = { version = "0.11.0", default-features = false, features = ["hyper-client"] }
 
 [dev-dependencies]
+ct-codecs = "1.1.7"
 http-body-util = "0.1.4"
+jwt-simple = { version = "0.12.17", default-features = false, features = ["pure-rust"] }
 rand = "0.9"
 tower = { version = "0.5.3", features = ["util"] }

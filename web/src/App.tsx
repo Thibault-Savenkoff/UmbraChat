@@ -415,7 +415,7 @@ function App() {
   if (state.status === "settings") {
     return (
       <div className="app-shell">
-        <Settings onBack={handleBackToMenu} />
+        <Settings account={state.account} onBack={handleBackToMenu} />
       </div>
     );
   }

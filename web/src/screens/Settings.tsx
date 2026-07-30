@@ -1,8 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { isEncryptionEnabled, enableEncryption, disableEncryption } from "../crypto/vault";
 import { exportBackup } from "../crypto/backup";
+import { registerPushSubscription, unregisterPushSubscription, vapidPublicKeyToUint8Array } from "../api/push";
+import { loadPushDisplayLevel, savePushDisplayLevel, type PushDisplayLevel } from "../storage/pushPrefsStore";
+import type { LocalAccount } from "../storage/keyStore";
 
 interface SettingsProps {
+  account: LocalAccount;
   onBack: () => void;
 }
 
@@ -17,7 +21,7 @@ function downloadBlob(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-export function Settings({ onBack }: SettingsProps) {
+export function Settings({ account, onBack }: SettingsProps) {
   const [enabled, setEnabled] = useState(isEncryptionEnabled());
   const [settingUp, setSettingUp] = useState(false);
   const [passphrase, setPassphrase] = useState("");
@@ -30,6 +34,21 @@ export function Settings({ onBack }: SettingsProps) {
   const [backupPassphrase, setBackupPassphrase] = useState("");
   const [backupWorking, setBackupWorking] = useState(false);
   const [backupError, setBackupError] = useState<string>();
+
+  const [notifEnabled, setNotifEnabled] = useState(false);
+  const [notifWorking, setNotifWorking] = useState(false);
+  const [notifError, setNotifError] = useState<string>();
+  const [displayLevel, setDisplayLevel] = useState<PushDisplayLevel>("generic");
+
+  useEffect(() => {
+    (async () => {
+      if (!("serviceWorker" in navigator)) return;
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      setNotifEnabled(subscription !== null);
+      setDisplayLevel(await loadPushDisplayLevel());
+    })();
+  }, []);
 
   const canSubmit = passphrase.length >= MIN_PASSPHRASE_LENGTH && passphrase === confirm;
 
@@ -74,6 +93,55 @@ export function Settings({ onBack }: SettingsProps) {
     } finally {
       setBackupWorking(false);
     }
+  }
+
+  async function handleEnableNotifications() {
+    setNotifWorking(true);
+    setNotifError(undefined);
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        setNotifError("permission denied - allow notifications for this site in your browser settings to use this");
+        return;
+      }
+      const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+      if (!vapidKey) throw new Error("push notifications aren't configured on this deployment");
+
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: vapidPublicKeyToUint8Array(vapidKey) as BufferSource,
+      });
+      await registerPushSubscription(subscription.toJSON(), account);
+      await savePushDisplayLevel("generic");
+      setDisplayLevel("generic");
+      setNotifEnabled(true);
+    } catch (err) {
+      setNotifError(err instanceof Error ? err.message : "failed to enable notifications");
+    } finally {
+      setNotifWorking(false);
+    }
+  }
+
+  async function handleDisableNotifications() {
+    setNotifWorking(true);
+    setNotifError(undefined);
+    try {
+      await unregisterPushSubscription(account);
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (subscription) await subscription.unsubscribe();
+      setNotifEnabled(false);
+    } catch (err) {
+      setNotifError(err instanceof Error ? err.message : "failed to disable notifications");
+    } finally {
+      setNotifWorking(false);
+    }
+  }
+
+  async function handleDisplayLevelChange(level: PushDisplayLevel) {
+    setDisplayLevel(level);
+    await savePushDisplayLevel(level);
   }
 
   return (
@@ -144,6 +212,48 @@ export function Settings({ onBack }: SettingsProps) {
           Saves an encrypted file you keep yourself. Forgetting this passphrase means the backup can't be restored.
         </p>
         {backupError && <p role="alert">{backupError}</p>}
+      </section>
+
+      <section className="panel stack">
+        <h2>Notifications</h2>
+        <div className="row">
+          <span data-testid="notifications-status">{notifEnabled ? "On" : "Off"}</span>
+          {notifEnabled ? (
+            <button className="danger" onClick={handleDisableNotifications} disabled={notifWorking}>
+              {notifWorking ? "Disabling..." : "Disable"}
+            </button>
+          ) : (
+            <button onClick={handleEnableNotifications} disabled={notifWorking}>
+              {notifWorking ? "Enabling..." : "Enable"}
+            </button>
+          )}
+        </div>
+        {notifEnabled && (
+          <div className="stack" role="radiogroup" aria-label="Notification content">
+            <label>
+              <input
+                type="radio"
+                name="notif-level"
+                checked={displayLevel === "generic"}
+                onChange={() => handleDisplayLevelChange("generic")}
+              />
+              New message (generic)
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="notif-level"
+                checked={displayLevel === "silent"}
+                onChange={() => handleDisplayLevelChange("silent")}
+              />
+              Nothing shown (silent)
+            </label>
+          </div>
+        )}
+        <p className="hint">
+          Works even when the app is closed - but on iPhone, only after adding it to your home screen.
+        </p>
+        {notifError && <p role="alert">{notifError}</p>}
       </section>
     </main>
   );
