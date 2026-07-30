@@ -25,7 +25,8 @@
     "e2e:backup-restore": "node e2e-backup-restore.mjs",
     "e2e:service-worker": "node e2e-service-worker.mjs",
     "e2e:push-notifications": "node e2e-push-notifications.mjs",
-    "e2e:nicknames": "node e2e-nicknames.mjs"
+    "e2e:nicknames": "node e2e-nicknames.mjs",
+    "e2e:typing-signal": "node e2e-typing-signal.mjs"
   },
   "dependencies": {
     "react": "^19.2.7",
