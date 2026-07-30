@@ -7,7 +7,20 @@ import { isEncryptionEnabled, isVaultActive, unlock } from "./crypto/vault";
 import { loadMessages, type ChatMessage } from "./storage/messageStore";
 import { registerAccount } from "./api/register";
 import { completeLink } from "./api/devices";
-import { startConversation, sendText, sendFile, markFileOpened, markConversationRead, poll, getTimerSeconds, setDisappearingTimer, type FileSendStage, type FileDestruct } from "./chat/conversation";
+import {
+  startConversation,
+  sendText,
+  sendFile,
+  markFileOpened,
+  markConversationRead,
+  poll,
+  getTimerSeconds,
+  setDisappearingTimer,
+  sendTypingSignal,
+  type FileSendStage,
+  type FileDestruct,
+} from "./chat/conversation";
+import { loadTypingIndicatorEnabled } from "./storage/pushPrefsStore";
 import { startCall, acceptCall, declineCall, hangUp, handleCallSignal, subscribeToCallState, getCallState, type CallState } from "./chat/call";
 import { createGroup, sendGroupText, removeMember, handleGroupSignal, loadAllGroups, type Group } from "./chat/group";
 import { openStore } from "./crypto/session";
@@ -56,6 +69,7 @@ function App() {
   const [pendingChats, setPendingChats] = useState<string[]>([]);
   const pollTimer = useRef<number>(undefined);
   const pollIntervalRef = useRef(POLL_INTERVAL_MS);
+  const lastTypingSentRef = useRef(0);
   // Whichever screen's runPoll is currently active - iOS Safari (and other
   // mobile browsers) suspend setInterval almost entirely in a backgrounded
   // tab, so a message sent while the tab was in the background can sit
@@ -313,6 +327,18 @@ function App() {
     await setDisappearingTimer(state.contactId, seconds, state.account, state.store);
   }
 
+  // No point sending faster than the recipient's own poll interval would ever
+  // surface it - checked at call time (not cached) so flipping the Settings
+  // toggle off takes effect on the very next keystroke.
+  async function handleTyping() {
+    if (state.status !== "conversation") return;
+    if (!(await loadTypingIndicatorEnabled())) return;
+    const now = Date.now();
+    if (now - lastTypingSentRef.current < POLL_INTERVAL_MS) return;
+    lastTypingSentRef.current = now;
+    await sendTypingSignal(state.contactId, state.account, state.store).catch((err) => console.error("sendTypingSignal failed:", err));
+  }
+
   async function handleCreateGroup(name: string, memberAccountIds: string[]) {
     if (state.status !== "identity-ready") return;
     setCreating(true);
@@ -457,6 +483,7 @@ function App() {
         onOpenFile={handleOpenFile}
         onStartCall={(kind) => startCall(contactId, kind, account, store).catch((err) => console.error("startCall failed:", err))}
         onSetTimer={handleSetTimer}
+        onTyping={handleTyping}
         onBack={handleBackToMenu}
         sending={sending}
         fileStage={fileStage}

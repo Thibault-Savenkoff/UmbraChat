@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ChatMessage } from "../storage/messageStore";
-import { isFileTooLarge, type FileDestruct, type FileSendStage } from "../chat/conversation";
+import { isFileTooLarge, subscribeToTypingState, resetTypingState, type FileDestruct, type FileSendStage } from "../chat/conversation";
 import { loadNickname, saveNickname } from "../storage/nicknameStore";
 
 interface ConversationProps {
@@ -11,6 +11,7 @@ interface ConversationProps {
   onOpenFile: (messageId: string) => void;
   onStartCall: (kind: "voice" | "video") => void;
   onSetTimer: (seconds: number) => void;
+  onTyping: () => void;
   onBack: () => void;
   sending: boolean;
   fileStage?: FileSendStage;
@@ -88,6 +89,7 @@ export function Conversation({
   onOpenFile,
   onStartCall,
   onSetTimer,
+  onTyping,
   onBack,
   sending,
   fileStage,
@@ -99,9 +101,19 @@ export function Conversation({
   const [fileError, setFileError] = useState<string>();
   const [destructMode, setDestructMode] = useState("none");
   const [nickname, setNickname] = useState<string>();
+  const [contactTyping, setContactTyping] = useState(false);
 
   useEffect(() => {
     loadNickname(contactId).then(setNickname);
+  }, [contactId]);
+
+  useEffect(() => {
+    setContactTyping(false);
+    const unsubscribe = subscribeToTypingState(setContactTyping);
+    return () => {
+      unsubscribe();
+      resetTypingState();
+    };
   }, [contactId]);
 
   async function handleEditNickname() {
@@ -171,6 +183,12 @@ export function Conversation({
         </label>
       </div>
 
+      {contactTyping && (
+        <p className="hint" data-testid="typing-indicator">
+          {nickname ?? contactId} is typing…
+        </p>
+      )}
+
       <p role="note" className="disclosure" data-testid="screenshot-disclosure">
         ⚠ Screenshots can't be detected on web - assume anything shown here can be captured.
       </p>
@@ -192,7 +210,10 @@ export function Conversation({
             type="text"
             placeholder="Type a message..."
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              setText(e.target.value);
+              onTyping();
+            }}
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
             disabled={sending}
           />
