@@ -20,7 +20,8 @@
     "e2e:group-messaging": "node e2e-group-messaging.mjs",
     "e2e:incoming-chats": "node e2e-incoming-chats.mjs",
     "e2e:large-file": "node e2e-large-file.mjs",
-    "e2e:no-presence-oracle": "node e2e-no-presence-oracle.mjs"
+    "e2e:no-presence-oracle": "node e2e-no-presence-oracle.mjs",
+    "e2e:local-encryption": "node e2e-local-encryption.mjs"
   },
   "dependencies": {
     "react": "^19.2.7",

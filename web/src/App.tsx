@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SignalStore } from "wasm-crypto";
 import { generateIdentity, computeSafetyNumber } from "./crypto/identity";
 import { loadAccount, saveAccount, type LocalAccount } from "./storage/keyStore";
+import { isEncryptionEnabled, isVaultActive, unlock } from "./crypto/vault";
 import { loadMessages, type ChatMessage } from "./storage/messageStore";
 import { registerAccount } from "./api/register";
 import { completeLink } from "./api/devices";
@@ -19,6 +20,8 @@ import { CallScreen } from "./screens/CallScreen";
 import { Groups } from "./screens/Groups";
 import { GroupConversation } from "./screens/GroupConversation";
 import { IncomingChats } from "./screens/IncomingChats";
+import { Settings } from "./screens/Settings";
+import { Unlock } from "./screens/Unlock";
 
 const ACTIVE_CONTACT_KEY = "umbrachat:activeContactId";
 const POLL_INTERVAL_MS = 3000;
@@ -30,10 +33,12 @@ function isRinging(callState: CallState): boolean {
 
 type Status =
   | { status: "loading" }
+  | { status: "locked" }
   | { status: "anonymous" }
   | { status: "identity-ready"; account: LocalAccount; safetyNumber: string; groups: Group[] }
   | { status: "conversation"; account: LocalAccount; contactId: string; store: SignalStore; messages: ChatMessage[] }
-  | { status: "group"; account: LocalAccount; group: Group; store: SignalStore; messages: ChatMessage[] };
+  | { status: "group"; account: LocalAccount; group: Group; store: SignalStore; messages: ChatMessage[] }
+  | { status: "settings"; account: LocalAccount };
 
 function App() {
   const [state, setState] = useState<Status>({ status: "loading" });
@@ -68,22 +73,41 @@ function App() {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, []);
 
+  // The real boot logic - reused both when encryption is off (runs directly)
+  // and after a successful unlock (runs once the vault key is active).
+  async function bootIntoAccount() {
+    const existing = await loadAccount();
+    if (!existing) {
+      setState({ status: "anonymous" });
+      return;
+    }
+    const activeContactId = localStorage.getItem(ACTIVE_CONTACT_KEY);
+    if (activeContactId) {
+      await enterConversation(existing, activeContactId);
+      return;
+    }
+    await enterIdentityReady(existing);
+  }
+
   useEffect(() => {
-    loadAccount().then(async (existing) => {
-      if (!existing) {
-        setState({ status: "anonymous" });
-        return;
-      }
-      const activeContactId = localStorage.getItem(ACTIVE_CONTACT_KEY);
-      if (activeContactId) {
-        await enterConversation(existing, activeContactId);
-        return;
-      }
-      await enterIdentityReady(existing);
-    });
+    // Checked before calling loadAccount() at all - loadAccount() decrypts
+    // through the vault, which throws if encryption is on but nothing has
+    // unlocked it yet (isVaultActive() is false right after a fresh page
+    // load, always - the key only ever lives in memory, never localStorage).
+    if (isEncryptionEnabled() && !isVaultActive()) {
+      setState({ status: "locked" });
+    } else {
+      void bootIntoAccount();
+    }
 
     return () => window.clearInterval(pollTimer.current);
   }, []);
+
+  async function handleUnlock(passphrase: string): Promise<boolean> {
+    const ok = await unlock(passphrase, loadAccount);
+    if (ok) await bootIntoAccount();
+    return ok;
+  }
 
   // Shares the same pollTimer as enterConversation/enterGroup - a group invite
   // has to be discoverable from here too (there's otherwise no way to learn
@@ -317,9 +341,14 @@ function App() {
   }
 
   async function handleBackToMenu() {
-    if (state.status !== "conversation" && state.status !== "group") return;
+    if (state.status !== "conversation" && state.status !== "group" && state.status !== "settings") return;
     localStorage.removeItem(ACTIVE_CONTACT_KEY);
     await enterIdentityReady(state.account);
+  }
+
+  function handleOpenSettings() {
+    if (state.status !== "identity-ready") return;
+    setState({ status: "settings", account: state.account });
   }
 
   async function handleRemoveMember(memberAccountId: string) {
@@ -334,6 +363,14 @@ function App() {
   }
 
   if (state.status === "loading") return null;
+
+  if (state.status === "locked") {
+    return (
+      <div className="app-shell">
+        <Unlock onUnlock={handleUnlock} />
+      </div>
+    );
+  }
 
   if (state.status === "anonymous") {
     return (
@@ -353,7 +390,18 @@ function App() {
           <LinkedDevices account={state.account} />
           <Groups groups={state.groups} ownAccountId={state.account.accountId} onCreateGroup={handleCreateGroup} onOpenGroup={handleOpenGroup} creating={creating} error={error} />
           <NewConversation onStart={handleStartConversation} starting={starting} error={error} />
+          <button className="secondary" onClick={handleOpenSettings}>
+            Settings
+          </button>
         </div>
+      </div>
+    );
+  }
+
+  if (state.status === "settings") {
+    return (
+      <div className="app-shell">
+        <Settings onBack={handleBackToMenu} />
       </div>
     );
   }

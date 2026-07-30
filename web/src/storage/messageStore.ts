@@ -1,3 +1,5 @@
+import { encryptForStorage, decryptFromStorage } from "../crypto/vault";
+
 const DB_NAME = "umbrachat-messages";
 const STORE_NAME = "messages";
 
@@ -36,19 +38,32 @@ function openDb(): Promise<IDBDatabase> {
 
 export async function loadMessages(contactId: string): Promise<ChatMessage[]> {
   const db = await openDb();
-  return new Promise((resolve, reject) => {
+  const raw = await new Promise<unknown>((resolve, reject) => {
     const request = db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(contactId);
-    request.onsuccess = () => resolve((request.result as ChatMessage[] | undefined) ?? []);
+    request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+  return (await decryptFromStorage<ChatMessage[]>(raw)) ?? [];
 }
 
 export async function saveMessages(contactId: string, messages: ChatMessage[]): Promise<void> {
   const db = await openDb();
+  const stored = await encryptForStorage(messages);
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
-    tx.objectStore(STORE_NAME).put(messages, contactId);
+    tx.objectStore(STORE_NAME).put(stored, contactId);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
+  });
+}
+
+/** Every contact id with a stored message bucket - needed to migrate all of
+ * them when encryption is enabled/disabled. */
+export async function listMessageContactIds(): Promise<string[]> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const request = db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).getAllKeys();
+    request.onsuccess = () => resolve(request.result as string[]);
+    request.onerror = () => reject(request.error);
   });
 }
