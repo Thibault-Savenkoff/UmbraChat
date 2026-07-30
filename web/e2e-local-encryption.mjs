@@ -60,8 +60,28 @@ check("after enabling, the raw account record IS an EncryptedBlob", afterEnable 
 // vault stays valid within this same unlocked session).
 await page.click('[aria-label="Back to menu"]');
 await page.waitForSelector('[data-testid="account-id"]', { timeout: 15000 });
-const accountIdStillReadable = await page.textContent('[data-testid="account-id"]');
-check("the app itself still reads the account correctly right after enabling", accountIdStillReadable.trim().length > 0, accountIdStillReadable);
+const accountIdBeforeReload = (await page.textContent('[data-testid="account-id"]')).trim();
+check("the app itself still reads the account correctly right after enabling", accountIdBeforeReload.length > 0, accountIdBeforeReload);
+
+// --- Reload: a fresh page load always starts locked when encryption is on,
+// since the key only ever lives in memory, never localStorage. ---
+await page.reload();
+await page.waitForSelector('h1:has-text("Locked")', { timeout: 15000 });
+
+// Wrong passphrase first.
+await page.fill('input[placeholder="Passphrase"]', "not the right passphrase");
+await page.click("text=Unlock");
+await page.waitForSelector('[role="alert"]', { timeout: 10000 });
+const wrongPassError = await page.textContent('[role="alert"]');
+check("wrong passphrase shows an error and stays locked", wrongPassError.toLowerCase().includes("wrong"), wrongPassError);
+check("still on the Locked screen after a failed attempt", await page.locator('h1:has-text("Locked")').isVisible());
+
+// Then the correct one.
+await page.fill('input[placeholder="Passphrase"]', "correct horse battery staple");
+await page.click("text=Unlock");
+await page.waitForSelector('[data-testid="account-id"]', { timeout: 15000 });
+const accountIdAfterUnlock = (await page.textContent('[data-testid="account-id"]')).trim();
+check("correct passphrase unlocks and boots into the same account as before", accountIdAfterUnlock === accountIdBeforeReload, `before=${accountIdBeforeReload} after=${accountIdAfterUnlock}`);
 
 // --- Disable ---
 await page.click("text=Settings");
