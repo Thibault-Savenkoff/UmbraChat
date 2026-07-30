@@ -1,6 +1,6 @@
 ---
 objective: "A user can set a local-only nickname for a contact (shown in place of the raw account id), and can opt in to a typing indicator that never leaks anything to a contact whose conversation isn't open."
-status: in-progress
+status: implemented
 ---
 
 # Plan: Nicknames + optional typing indicator
