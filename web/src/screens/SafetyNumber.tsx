@@ -9,7 +9,7 @@ export function SafetyNumber({ accountId, safetyNumber, onContinue }: SafetyNumb
     <section className="panel stack">
       <h2>Your Identity</h2>
       <div>
-        <p className="hint">Safety number - share out of band to verify you're really you.</p>
+        <p className="hint">Key fingerprint of this device - read it out (in person or on a call) when a contact asks to check a new device of yours.</p>
         <p className="chip chip--block" data-testid="safety-number">
           {safetyNumber}
         </p>
